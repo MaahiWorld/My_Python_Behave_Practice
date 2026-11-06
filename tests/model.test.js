@@ -132,7 +132,7 @@ test('every prediction carries a reasoning ledger that adds up', () => {
   const m = match({ state: 'in', minute: 60, home: team('h', 0, { redCards: 1 }), away: team('a', 1) });
   const d = {
     table: { home: { gp: 10, gf: 20, ga: 10 }, away: { gp: 10, gf: 10, ga: 15 } },
-    form: { home: [{ gf: 2, ga: 1, res: 'W' }], away: [{ gf: 0, ga: 0, res: 'D' }] },
+    form: { home: Array(5).fill({ gf: 2, ga: 1, res: 'W' }), away: Array(5).fill({ gf: 0, ga: 0, res: 'D' }) },
     h2h: [{ homeId: 'h', hs: 3, as: 2 }, { homeId: 'a', hs: 1, as: 1 }, { homeId: 'h', hs: 2, as: 2 }],
     liveStats: { home: { shotsOnTarget: 6 }, away: { shotsOnTarget: 1 } },
   };
@@ -143,6 +143,7 @@ test('every prediction carries a reasoning ledger that adds up', () => {
   assert.ok(Math.abs(total - p.expectedMore) < 1e-9, 'step deltas sum to expected remaining goals');
   for (const r of p.reasons) assert.ok(r.detail.length > 20 && !r.detail.includes('undefined') && !r.detail.includes('NaN'), r.key);
   assert.equal(p.confidence.level, 'High');
+  assert.equal(predict(m, { ...d, form: { home: [{ gf: 2, ga: 1, res: 'W' }], away: [] } }).confidence.level, 'Medium', 'one recent match is not enough');
   assert.equal(p.summary.length, 2);
 });
 

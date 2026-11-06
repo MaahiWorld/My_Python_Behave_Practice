@@ -20,6 +20,28 @@ Matches where at least one more goal is 75% likely or better are pinned in a **H
 the top.
 Open any match for the full reasoning.
 
+## Only high-confidence predictions
+
+A match is listed only when its prediction is **high confidence**, meaning every core input is
+available: season attacking/defensive records for both teams (5+ games), recent form for both
+teams (4+ matches), and for live matches from 10', current match stats for both teams. Other matches
+are hidden, with a count of how many and why; ⚙ Settings can show them if you want.
+
+## Goal markets page
+
+The **Goal markets** page lists Over 1.5, Over 2.5 and Both-teams-to-score picks (and their
+Under/No sides) for live matches and those starting within 3 hours. A pick appears only when:
+
+1. the match prediction is high confidence;
+2. the model gives it at least 75%;
+3. independent cross-checks all agree at 60%+: the season record alone, recent form alone, the
+   prediction without live match stats, and head-to-head history (4+ meetings, before kick-off),
+   with at least two checks required;
+4. the market isn't already decided.
+
+Every pick shown is stored on the device and marked won or lost at full time, so each market builds
+its own track record (`js/markets.js`).
+
 ## What it analyses
 
 Every prediction is built from four groups of inputs, each shown as its own step with its effect on
@@ -99,6 +121,8 @@ js/api.js             ESPN fetchers and parsers
 js/model.js           Prediction model
 js/demo.js            Offline demo data
 js/sources.js         Paid/keyed data source adapters + registry
+js/markets.js         Over 1.5 / 2.5 / BTTS picks, validation, track record
+js/merge.js           Merging and de-duplicating matches across sources
 sw.js                 Service worker (offline app shell)
 manifest.webmanifest  PWA manifest
 tests/                Unit tests

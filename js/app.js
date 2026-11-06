@@ -3,6 +3,7 @@ import { scanStats as espnScan } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
+import { MARKETS, MIN_PROB, MIN_CHECK, marketPicks, recordPicks, settlePicks, trackRecord } from './markets.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -18,6 +19,7 @@ const settings = {
   demo: store.get('demo', false),
   proxy: store.get('proxy', ''),
   refresh: store.get('refresh', 30),
+  showAll: store.get('showall', false),
 };
 const keyFor = (id) => store.get('key:' + id, '');
 const scanOn = (id) => store.get('scan:' + id, true);
@@ -29,6 +31,7 @@ const state = {
   matches: [],
   tab: store.get('tab', 'live'),
   sort: store.get('sort', 'chance'),
+  market: store.get('market', 'o25'),
   league: 'all',
   details: new Map(), // key -> { detail, at }
   error: null,
@@ -59,6 +62,7 @@ async function loadMatches(force = false) {
       state.sourceCounts = lists.map(({ src, matches }) => ({ name: src.name, id: src.id, n: matches.length, live: matches.filter((m) => m.state === 'in').length }));
       state.usingDemo = false;
     }
+    settlePicks(state.matches);
     state.error = null;
     state.updated = new Date();
   } catch (e) {
@@ -85,30 +89,41 @@ async function getDetail(m, { force = false, ttl } = {}) {
   return detail;
 }
 
-// Pre-load full analysis for live matches on free sources, so the list shows data-backed chances.
-// Limited-quota sources are only fetched when you open a match.
+// Pre-load full analysis on free sources for live matches and those kicking off within 3 hours,
+// so confidence can be judged. Limited-quota sources are only fetched when you open a match.
 let warming = false;
-async function warmLive() {
+let rerenderTimer = null;
+function rerenderSoon() {
+  clearTimeout(rerenderTimer);
+  rerenderTimer = setTimeout(() => {
+    const r = route().name;
+    if (r === 'list') renderList();
+    else if (r === 'markets') renderMarkets();
+  }, 700);
+}
+const warmable = (m) => (m.league === 'demo' || !sourceById(m.source).needsKey)
+  && (m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 3 * 3_600_000));
+async function warm() {
   if (warming) return;
   warming = true;
-  const free = (m) => m.league === 'demo' || !sourceById(m.source).needsKey;
-  const queue = state.matches.filter((m) => m.state === 'in' && free(m))
-    .sort((a, b) => Math.abs(a.minute - 50) - Math.abs(b.minute - 50));
+  const queue = state.matches.filter(warmable)
+    .sort((a, b) => (a.state === 'in' ? 0 : 1) - (b.state === 'in' ? 0 : 1) || new Date(a.date) - new Date(b.date));
   const worker = async () => {
     while (queue.length) {
       const m = queue.shift();
-      try { await getDetail(m, { ttl: 60_000 }); } catch { /* keep the quick estimate */ }
-      if (route().name === 'list') patchCard(m);
+      try { await getDetail(m, { ttl: m.state === 'in' ? 60_000 : 1_800_000 }); } catch { /* stays unconfirmed */ }
+      rerenderSoon();
     }
   };
   try { await Promise.all([worker(), worker(), worker(), worker()]); } finally { warming = false; }
-  if (route().name === 'list') renderList();
+  rerenderSoon();
 }
 
 // ---- Routing ----
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h === 'sources') return { name: 'sources' };
+  if (h === 'markets') return { name: 'markets' };
   const m = h.match(/^m\/([^/]+)\/(.+)$/);
   return m ? { name: 'match', league: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : { name: 'list' };
 }
@@ -117,6 +132,7 @@ function render() {
   const r = route();
   if (r.name === 'match') renderMatch(r);
   else if (r.name === 'sources') renderSources();
+  else if (r.name === 'markets') { renderMarkets(); warm(); }
   else renderList();
 }
 
@@ -151,9 +167,18 @@ function counts() {
   for (const m of state.matches) c[m.state === 'in' ? 'live' : m.state === 'pre' ? 'upcoming' : 'finished']++;
   return c;
 }
+// Only high-confidence predictions are listed (unless "show all" is on in Settings).
+const isConfident = (m) => state.details.has(keyOf(m)) && predFor(m).confidence.level === 'High';
+function hiddenInfo(want) {
+  if (settings.showAll || want === 'post') return { pending: 0, thin: 0 };
+  const pool = state.matches.filter((m) => m.state === want && (state.league === 'all' || m.league === state.league) && !isConfident(m));
+  const pending = pool.filter((m) => !state.details.has(keyOf(m)) && warmable(m)).length;
+  return { pending, thin: pool.length - pending };
+}
 function filtered() {
   const want = { live: 'in', upcoming: 'pre', finished: 'post' }[state.tab];
-  const list = state.matches.filter((m) => m.state === want && (state.league === 'all' || m.league === state.league));
+  const list = state.matches.filter((m) => m.state === want && (state.league === 'all' || m.league === state.league)
+    && (settings.showAll || want === 'post' || isConfident(m)));
   if (state.tab === 'live' && state.sort === 'chance') {
     const score = new Map(list.map((m) => [m, predFor(m).expectedMore]));
     return list.sort((a, b) => score.get(b) - score.get(a));
@@ -216,11 +241,6 @@ function matchCard(m, showLeague = false) {
   </a>`;
 }
 
-function patchCard(m) {
-  const el = view.querySelector(`[data-key="${CSS.escape(keyOf(m))}"]`);
-  if (el) el.outerHTML = matchCard(m, !!el.dataset.showleague);
-}
-
 function footer() {
   if (state.usingDemo) return '';
   const lines = state.sourceCounts.map((c) => {
@@ -239,9 +259,14 @@ function renderList() {
     .sort((a, b) => a[1].localeCompare(b[1]));
   const tabs = [['live', 'Live'], ['upcoming', 'Upcoming'], ['finished', 'Finished']];
   const byChance = state.tab === 'live' && state.sort === 'chance';
+  const hidden = hiddenInfo(want);
   let body = '';
   if (state.loading && !state.matches.length) body = '<div class="skeleton"></div>'.repeat(5);
-  else if (!list.length) {
+  else if (!list.length && (hidden.pending || hidden.thin)) {
+    body = `<div class="empty muted">No high-confidence predictions ${state.tab === 'live' ? 'among live matches' : 'among upcoming matches'} yet.
+      ${hidden.pending ? `<br>Analysing ${hidden.pending} match${hidden.pending > 1 ? 'es' : ''}…` : ''}
+      ${hidden.thin ? `<br>${hidden.thin} match${hidden.thin > 1 ? 'es' : ''} hidden: not enough data for a confident prediction.` : ''}</div>`;
+  } else if (!list.length) {
     body = `<div class="empty muted">${state.tab === 'live' ? `No matches are live right now${state.usingDemo ? '' : ` across the ${espnScan.leagues}+ competitions scanned`}.` : 'Nothing here right now.'}
       ${state.tab === 'live' && c.upcoming ? '<p><button class="btn" data-tab="upcoming">See upcoming matches</button></p>' : ''}</div>`;
   } else if (byChance) {
@@ -259,13 +284,15 @@ function renderList() {
   const banner = state.usingDemo
     ? `<div class="banner">${state.error && !settings.demo ? `Couldn't reach live data (${esc(state.error)}). ` : ''}Showing <b>demo matches</b>. ${settings.demo ? 'Turn off demo mode in ⚙ for real fixtures.' : 'Check your connection or set a CORS proxy in ⚙.'}</div>`
     : state.error ? `<div class="banner">Refresh failed: ${esc(state.error)}</div>` : '';
-  view.innerHTML = `${banner}
+  view.innerHTML = `${banner}${nav('list')}
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}<span class="count">${c[k]}</span></button>`).join('')}</div>
     ${state.tab === 'live' ? `<div class="chips sort"><button class="chip" data-sort="chance" aria-pressed="${state.sort === 'chance'}">⚡ Most goals expected</button><button class="chip" data-sort="league" aria-pressed="${state.sort === 'league'}">By league</button></div>` : ''}
     ${leagues.length > 1 ? `<div class="chips">${[['all', `All (${leagues.length})`], ...leagues].map(([k, l]) => `<button class="chip" data-league="${esc(k)}" aria-pressed="${state.league === k}">${esc(l)}</button>`).join('')}</div>` : ''}
+    ${list.length && (hidden.pending || hidden.thin) ? `<p class="hidden-note">Showing ${list.length} high-confidence prediction${list.length > 1 ? 's' : ''} · ${hidden.thin ? `${hidden.thin} hidden (not enough data)` : ''}${hidden.thin && hidden.pending ? ' · ' : ''}${hidden.pending ? `${hidden.pending} still being analysed` : ''}</p>` : ''}
+    ${settings.showAll && want !== 'post' ? '<p class="hidden-note">Showing all matches, including low-confidence ones (change in ⚙ Settings).</p>' : ''}
     ${body}
     ${footer()}
-    <p class="disclaimer">Goal chances are model estimates · ~ = quick estimate before full stats load · ≈ = clock estimated between updates</p>`;
+    <p class="disclaimer">Goal chances are model estimates · ≈ = clock estimated between updates</p>`;
 }
 
 view.addEventListener('click', (e) => {
@@ -273,9 +300,59 @@ view.addEventListener('click', (e) => {
   if (t) { state.tab = t.dataset.tab; state.league = 'all'; store.set('tab', state.tab); renderList(); return; }
   const l = e.target.closest('[data-league]');
   if (l) { state.league = l.dataset.league; renderList(); return; }
+  const mt = e.target.closest('[data-market]');
+  if (mt) { state.market = mt.dataset.market; store.set('market', state.market); renderMarkets(); return; }
   const so = e.target.closest('[data-sort]');
   if (so) { state.sort = so.dataset.sort; store.set('sort', state.sort); renderList(); }
 });
+
+function nav(current) {
+  return `<nav class="nav"><a href="#/" ${current === 'list' ? 'aria-current="page"' : ''}>Matches</a><a href="#/markets" ${current === 'markets' ? 'aria-current="page"' : ''}>Goal markets</a></nav>`;
+}
+
+// ---- Goal markets page ----
+function renderMarkets() {
+  const mk = MARKETS.find((x) => x.id === state.market) || MARKETS[1];
+  const all = [];
+  for (const m of state.matches) {
+    const hit = state.details.get(keyOf(m));
+    if (!hit || (m.state !== 'in' && m.state !== 'pre')) continue;
+    const picks = marketPicks(m, hit.detail);
+    recordPicks(m, picks);
+    for (const pk of picks) all.push({ m, pk });
+  }
+  const counts = Object.fromEntries(MARKETS.map((x) => [x.id, all.filter((a) => a.pk.market.id === x.id).length]));
+  const list = all.filter((a) => a.pk.market.id === mk.id).sort((a, b) => b.pk.p - a.pk.p);
+  const pending = state.matches.filter((m) => warmable(m) && !state.details.has(keyOf(m))).length;
+  const tr = trackRecord().by[mk.id];
+  const record = tr.settled
+    ? `<b>${tr.won} of ${tr.settled}</b> correct (${Math.round((tr.won / tr.settled) * 100)}%)${tr.pending ? ` · ${tr.pending} awaiting full time` : ''}`
+    : `No settled picks yet${tr.pending ? ` · ${tr.pending} awaiting full time` : ''}. Every pick shown is recorded and checked at full time.`;
+  const card = ({ m, pk }) => {
+    const live = m.state === 'in';
+    return `<a class="card pick" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">
+      <div class="pick-top"><span class="lg-line">${esc(m.leagueName)}</span><span class="status ${live ? 'live' : ''}">${esc(statusLabel(m))}</span></div>
+      <div class="pick-teams">${esc(m.home.short)} ${m.state === 'pre' ? 'vs' : `<b>${m.home.score}–${m.away.score}</b>`} ${esc(m.away.short)}</div>
+      <div class="pick-main"><span class="pick-label ${pk.side}">${esc(pk.label)}</span><span class="pick-p">${pct(pk.p)}</span><span class="badge on">${pk.level} confidence</span></div>
+      <div class="checks">${pk.checks.map((c) => `<span class="chk">✓ ${esc(c.label)} ${esc(c.txt)}</span>`).join('')}</div>
+      <div class="muted small">Expected ${live ? 'final ' : ''}total ${pk.pred.expectedFinalTotal.toFixed(1)} goals${live ? ` · ${pk.pred.expectedMore.toFixed(1)} more expected` : ''}</div>
+    </a>`;
+  };
+  view.innerHTML = `${nav('markets')}
+    <div class="tabs" role="tablist">${MARKETS.map((x) => `<button class="tab" role="tab" data-market="${x.id}" aria-selected="${x.id === mk.id}">${x.id === 'btts' ? 'BTTS' : x.yes}<span class="count">${counts[x.id]}</span></button>`).join('')}</div>
+    <div class="card section record"><h3>${esc(mk.name)} · track record on this device</h3><p>${record}</p></div>
+    <details class="howto"><summary>How picks are validated</summary>
+      <ol>
+        <li>The match prediction must be <b>high confidence</b>: season attack/defence records and recent form for both teams, plus current match stats when live.</li>
+        <li>The model must give the pick at least <b>${Math.round(MIN_PROB * 100)}%</b>.</li>
+        <li>Independent cross-checks must all agree (at least ${Math.round(MIN_CHECK * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
+        <li>Markets already decided (e.g. Over 1.5 with two goals in) are left out.</li>
+      </ol>
+      <p class="muted small">Covers live matches and those starting within 3 hours on free data. Statistical estimates, not betting advice.</p>
+    </details>
+    ${list.length ? list.map(card).join('') : `<div class="empty muted">No validated ${esc(mk.name)} picks right now.${pending ? `<br>Analysing ${pending} match${pending > 1 ? 'es' : ''}…` : '<br>Picks appear only when every check agrees, so quiet spells are normal.'}</div>`}
+    <p class="disclaimer">Statistical estimates only — not betting advice.</p>`;
+}
 
 // ---- Match view ----
 function gauge(p) {
@@ -547,7 +624,8 @@ let timer = null;
 async function refresh(full = true, force = false) {
   await loadMatches(force);
   const r = route();
-  if (r.name === 'list') { renderList(); warmLive(); }
+  if (r.name === 'list') { renderList(); warm(); }
+  else if (r.name === 'markets') { renderMarkets(); warm(); }
   else if (r.name === 'match') renderMatch(r, !full);
 }
 function schedule() {
@@ -565,6 +643,7 @@ $('#settings-btn').addEventListener('click', () => {
   $('#opt-demo').checked = settings.demo;
   $('#opt-proxy').value = settings.proxy;
   $('#opt-refresh').value = String(settings.refresh);
+  $('#opt-showall').checked = settings.showAll;
   dlg.showModal();
 });
 $('#sources-link').addEventListener('click', () => dlg.close());
@@ -573,6 +652,8 @@ dlg.addEventListener('close', () => {
   settings.demo = $('#opt-demo').checked;
   settings.proxy = $('#opt-proxy').value.trim();
   settings.refresh = parseInt($('#opt-refresh').value, 10);
+  settings.showAll = $('#opt-showall').checked;
+  store.set('showall', settings.showAll);
   store.set('demo', settings.demo); store.set('proxy', settings.proxy); store.set('refresh', settings.refresh);
   state.details.clear();
   state.matches = [];

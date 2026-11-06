@@ -166,24 +166,32 @@ function formLine(form) {
   return `last ${form.length}: ${form.map((g) => g.res).join('')}, scored ${gf}, conceded ${ga}`;
 }
 
-// Confidence in the inputs: how much real evidence fed the model.
-function confidence(match, detail, h2h) {
+// Confidence in the inputs. "High" needs every core input:
+//  - season attacking/defensive records for both teams (5+ games each)
+//  - recent form for both teams (4+ matches each)
+//  - for live matches from 10', current match stats for both teams
+// Head-to-head history is a bonus, not required.
+export function confidence(match, detail, h2h) {
   const have = [], missing = [];
   const t = detail.table || {};
-  if (t.home?.gp >= 5 && t.away?.gp >= 5) have.push('attacking and defensive records for both teams');
-  else missing.push('season attacking/defensive records (cup game or early season)');
-  if (detail.form?.home?.length && detail.form?.away?.length) have.push('recent form for both teams');
-  else missing.push('recent form');
-  if (h2h.n >= 3) have.push(`${h2h.n} head-to-head meetings`);
-  else missing.push('enough head-to-head history');
-  if (match.state === 'in') {
-    const ls = detail.liveStats?.home;
-    if (ls && Number.isFinite(ls.xg)) have.push('current match stats with xG');
-    else if (ls && (Number.isFinite(ls.shotsOnTarget) || Number.isFinite(ls.shots))) have.push('current match stats');
+  const core = [];
+  const seasonOk = t.home?.gp >= 5 && t.away?.gp >= 5;
+  core.push(seasonOk);
+  (seasonOk ? have : missing).push(seasonOk ? 'attacking and defensive records for both teams' : 'season attacking/defensive records for both teams (cup game or early season)');
+  const formOk = (detail.form?.home?.length || 0) >= 4 && (detail.form?.away?.length || 0) >= 4;
+  core.push(formOk);
+  (formOk ? have : missing).push(formOk ? 'recent form for both teams' : 'recent form for both teams');
+  if (match.state === 'in' && (match.minute || 0) >= 10 && phaseOf(match) !== 'PEN') {
+    const ok = (s) => s && (Number.isFinite(s.xg) || Number.isFinite(s.shotsOnTarget) || Number.isFinite(s.shots));
+    const liveOk = ok(detail.liveStats?.home) && ok(detail.liveStats?.away);
+    core.push(liveOk);
+    if (liveOk) have.push(Number.isFinite(detail.liveStats.home.xg) ? 'current match stats with xG' : 'current match stats');
     else missing.push('current match stats');
   }
-  const score = have.length / (have.length + missing.length);
-  return { level: score >= 0.75 ? 'High' : score >= 0.45 ? 'Medium' : 'Low', have, missing };
+  if (h2h.n >= 3) have.push(`${h2h.n} head-to-head meetings`);
+  const okCount = core.filter(Boolean).length;
+  const level = okCount === core.length ? 'High' : okCount >= core.length - 1 ? 'Medium' : 'Low';
+  return { level, have, missing };
 }
 
 export function predict(match, detail = {}) {
@@ -369,11 +377,12 @@ export function predict(match, detail = {}) {
       scores.push({ home: hs + i, away: as + j, p: poisson(i, rh) * poisson(j, ra) });
   scores.sort((a, b) => b.p - a.p);
 
-  let homeWin = 0, draw = 0, awayWin = 0, over25 = 0, btts = 0;
+  let homeWin = 0, draw = 0, awayWin = 0, over15 = 0, over25 = 0, btts = 0;
   for (const s of scores) {
     if (s.home > s.away) homeWin += s.p;
     else if (s.home < s.away) awayWin += s.p;
     else draw += s.p;
+    if (s.home + s.away > 1.5) over15 += s.p;
     if (s.home + s.away > 2.5) over25 += s.p;
     if (s.home > 0 && s.away > 0) btts += s.p;
   }
@@ -401,6 +410,7 @@ export function predict(match, detail = {}) {
     moreDist,
     topScores: scores.slice(0, 4),
     outcome: { homeWin, draw, awayWin },
+    over15,
     over25,
     btts,
     fullMatch: { home: fullHome, away: fullAway },

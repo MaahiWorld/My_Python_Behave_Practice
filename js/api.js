@@ -55,6 +55,21 @@ async function getJSON(url, proxy) {
   return res.json();
 }
 
+// Which part of the match is being played: H1, HT, H2, BREAK_ET, ET or PEN.
+export function parsePhase(status) {
+  const name = status?.type?.name || '';
+  const period = status?.period || 0;
+  if (/SHOOTOUT|PENALT/.test(name) || period >= 5) return 'PEN';
+  if (/HALFTIME/.test(name) && period >= 3) return 'ET';
+  if (/HALFTIME/.test(name)) return 'HT';
+  if (/END_OF_REGULATION|END_REGULATION/.test(name)) return 'BREAK_ET';
+  if (/END_OF_EXTRATIME|END_EXTRATIME/.test(name)) return 'PEN';
+  if (period === 3 || period === 4 || /OVERTIME|EXTRA/.test(name)) return 'ET';
+  if (period === 1) return 'H1';
+  if (period === 2) return 'H2';
+  return null;
+}
+
 export function parseMinute(status) {
   if (!status) return 0;
   const name = status.type?.name || '';
@@ -97,6 +112,7 @@ export function parseScoreboard(json, league) {
       date: e.date,
       state,
       minute: state === 'in' ? parseMinute(st) : 0,
+      phase: state === 'in' ? parsePhase(st) : null,
       detail: st.type?.shortDetail || st.type?.detail || '',
       venue: comp.venue?.fullName || '',
       home: parseTeam(h, comp.details),

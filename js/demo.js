@@ -57,6 +57,7 @@ export function demoMatches() {
     state,
     minute,
     detail: state === 'in' ? (minute === 45 ? 'HT' : `${minute}'`) : state === 'post' ? 'FT' : '',
+    phase: state !== 'in' ? null : minute === 45 ? 'HT' : minute < 45 ? 'H1' : 'H2',
     venue: TEAMS[h].name + ' Stadium',
     home: { ...TEAMS[h], score: hs, redCards: i === 2 ? 1 : 0, formString: '' },
     away: { ...TEAMS[a], score: as, redCards: 0, formString: '' },

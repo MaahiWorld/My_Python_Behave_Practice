@@ -1,7 +1,7 @@
 import { SOURCES, sourceById, afQuota } from './sources.js';
 import { scanStats as espnScan } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
-import { predict } from './model.js';
+import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -127,12 +127,23 @@ function crest(team, lg = false) {
   return `<span class="${cls}" style="background:${esc(team.color || '#64748b')}">${esc(team.abbr)}</span>`;
 }
 function statusLabel(m) {
-  if (m.state === 'in') return m.detail === 'HT' ? 'HT' : `${m.estimatedClock ? '≈' : ''}${m.minute}'`;
+  if (m.state === 'in') {
+    const ph = phaseOf(m);
+    if (ph === 'HT') return 'HT';
+    if (ph === 'BREAK_ET') return 'ET break';
+    if (ph === 'PEN') return 'Pens';
+    const clock = ph === 'H1' && m.minute > 45 ? `45+${m.minute - 45}` : ph === 'H2' && m.minute > 90 ? `90+${m.minute - 90}`
+      : ph === 'ET' && m.minute > 120 ? `120+${m.minute - 120}` : String(m.minute);
+    return `${m.estimatedClock ? '≈' : ''}${clock}'${ph === 'ET' ? ' ET' : ''}`;
+  }
   if (m.state === 'post') return 'FT';
   return new Date(m.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 const reds = (n) => '<span class="red-card" title="Red card"></span>'.repeat(n || 0);
 const predFor = (m) => predict(m, state.details.get(keyOf(m))?.detail);
+// What "the next 15 minutes" means at this point of the match.
+const windowLabel = (ph) => ({ HT: 'first 15 minutes of the second half', BREAK_ET: 'first 15 minutes of extra time' }[ph] || 'next 15 minutes');
+const windowShort = (ph) => ({ HT: "goal in 15' after HT", BREAK_ET: "goal in first 15' of ET" }[ph] || "goal in next 15'");
 
 // ---- List view ----
 function counts() {
@@ -155,10 +166,11 @@ function cardChance(m) {
   const hit = state.details.get(keyOf(m));
   const p = predFor(m);
   if (m.state === 'post') return `<div class="chance"><div class="lbl">${m.home.score + m.away.score} goals</div></div>`;
+  if (m.state === 'in' && p.phase === 'PEN') return '<div class="chance quiet"><div class="lbl">Penalty<br>shoot-out</div></div>';
   if (m.state === 'in') {
     return `<div class="chance ${p.soonLevel}">
       <div class="pct">${pct(p.pNext15)}</div>
-      <div class="lbl">goal in next 15'${hit ? '' : ' ~'}</div>
+      <div class="lbl">${windowShort(p.phase)}${hit ? '' : ' ~'}</div>
       <div class="mini-bar"><i style="width:${pct(p.pNext15)}"></i></div>
       <div class="lbl2">rest of match ${pct(p.pMoreGoal)}</div>
     </div>`;
@@ -339,8 +351,9 @@ function matchHTML(m, d, err) {
     : `<section class="card section">
       ${live ? `<div class="headline ${p.soonLevel}">
         <div class="hl-match">${esc(m.home.name)} vs ${esc(m.away.name)} · ${esc(statusLabel(m))} · ${m.home.score}–${m.away.score}</div>
-        <div class="hl-text">${p.soonLevel === 'hot' ? '⚡ A goal is expected soon.' : p.soonLevel === 'warm' ? 'A goal is possible soon.' : 'A quiet spell is more likely right now.'}
-          <b>${pct(p.pNext15)}</b> chance of a goal in the next 15 minutes${p.medianNextGoal ? `; half the time the next goal comes within <b>~${p.medianNextGoal} min</b>` : ''}.</div>
+        <div class="hl-text">${p.phase === 'PEN' ? 'The match has gone to penalties. Shoot-out penalties don\'t count as match goals, so no more goals are expected.'
+          : `${p.soonLevel === 'hot' ? '⚡ A goal is expected soon.' : p.soonLevel === 'warm' ? 'A goal is possible soon.' : 'A quiet spell is more likely right now.'}
+          <b>${pct(p.pNext15)}</b> chance of a goal in the ${windowLabel(p.phase)}${p.medianNextGoal ? `; half the time the next goal comes within <b>~${p.medianNextGoal} min</b> of play` : ''}.`}</div>
       </div>` : ''}
       <h3>${live ? 'Will there be another goal before full time?' : 'Will there be goals?'}</h3>
       <div class="verdict">${gauge(p.pMoreGoal)}
@@ -350,7 +363,7 @@ function matchHTML(m, d, err) {
         </div>
       </div>
       <div class="kpis">
-        ${live ? `<div class="kpi"><b>${pct(p.pNext15)}</b><span>goal in next 15 min</span></div>` : ''}
+        ${live ? `<div class="kpi"><b>${pct(p.pNext15)}</b><span>goal in ${windowLabel(p.phase)}</span></div>` : ''}
         <div class="kpi"><b>${p.expectedMore.toFixed(2)}</b><span>expected ${live ? 'more ' : ''}goals</span></div>
         <div class="kpi"><b>${p.expectedFinalTotal.toFixed(1)}</b><span>expected final total</span></div>
         <div class="kpi"><b>${p.expectedMoreHome.toFixed(2)} · ${p.expectedMoreAway.toFixed(2)}</b><span>${H} · ${A} xG ${live ? 'remaining' : ''}</span></div>

@@ -14,10 +14,11 @@ export const sameMatch = (a, b) => Math.abs(new Date(a.date) - new Date(b.date))
 
 // Sources with a limited quota refresh their list less often, so move their clock forward meanwhile.
 export function extrapolate(m) {
-  if (m.state !== 'in' || !m.fetchedAt || m.detail === 'HT') return m;
+  const cap = { H1: 47, H2: 98, ET: 122 }[m.phase || (m.minute <= 45 ? 'H1' : 'H2')];
+  if (m.state !== 'in' || !m.fetchedAt || m.detail === 'HT' || !cap) return m;
   const add = Math.floor((Date.now() - m.fetchedAt) / 60_000);
   if (add <= 0) return m;
-  const minute = Math.min(m.minute + add, m.minute <= 45 ? 47 : 95);
+  const minute = Math.min(m.minute + add, cap);
   return { ...m, minute, detail: `${minute}'`, estimatedClock: true };
 }
 

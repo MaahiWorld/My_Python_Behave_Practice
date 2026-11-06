@@ -12,6 +12,10 @@ cover, sorted by how likely a goal is in the **next 15 minutes**:
 > ⚡ Goal expected soon: 61% chance of a goal in the next 15 minutes; half the time the next goal
 > comes within ~12 minutes. 83% chance of another goal before full time.
 
+This works at every point of a match: from kick-off, through first-half added time (shown as 45+2'),
+half time (the next 15 minutes means the first 15 of the second half), late added time (90+3'),
+the break before extra time, extra time, and penalty shoot-outs (which don't count as match goals).
+
 Matches at 50% or more for the next 15 minutes are pinned in a **Goal watch** group at the top.
 Open any match for the full reasoning.
 

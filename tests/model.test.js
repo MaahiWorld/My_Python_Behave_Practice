@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, remainingShare, poisson, teamStrength } from '../js/model.js';
-import { parseScoreboard, parseSummary, parseStandings, parseMinute } from '../js/api.js';
+import { predict, remainingShare, windowShare, poisson, teamStrength } from '../js/model.js';
+import { parseScoreboard, parseSummary, parseStandings, parseMinute, parsePhase } from '../js/api.js';
 import { demoMatches, demoDetail } from '../js/demo.js';
 
 const team = (id, score = 0, extra = {}) => ({ id, name: 'T' + id, short: 'T' + id, abbr: 'T' + id, score, redCards: 0, ...extra });
@@ -16,7 +16,7 @@ test('poisson probabilities sum to ~1', () => {
 test('remaining share falls from 1 to near 0 across a match', () => {
   assert.equal(remainingShare(0, 'pre'), 1);
   assert.equal(remainingShare(90, 'post'), 0);
-  assert.ok(Math.abs(remainingShare(45, 'in') - 0.55) < 1e-9);
+  assert.ok(Math.abs(remainingShare(45, 'in', 'HT') - 0.55) < 1e-9);
   assert.ok(remainingShare(30, 'in') > remainingShare(70, 'in'));
   assert.ok(remainingShare(94, 'in') > 0);
 });
@@ -150,4 +150,48 @@ test('finished matches expect no more goals', () => {
   const p = predict(match({ state: 'post', home: team('h', 2), away: team('a', 1) }));
   assert.equal(p.expectedMore, 0);
   assert.equal(p.pMoreGoal, 0);
+});
+
+test('a prediction exists for every minute of a match, from kick-off to the end of extra time', () => {
+  const t = (id) => ({ id, name: id, short: id, abbr: id, score: 0 });
+  const at = (minute, phase) => predict({ id: '1', state: 'in', minute, phase, home: t('h'), away: t('a') });
+  let prevRest = 1;
+  for (let m = 0; m <= 100; m++) {
+    const phase = m <= 45 ? 'H1' : 'H2';
+    const p = at(m, phase);
+    assert.ok(p.pNext15 > 0 && p.pNext15 < 1, `${m}' next15`);
+    assert.ok(p.pMoreGoal > 0 && p.pMoreGoal <= prevRest + 1e-9, `${m}' rest-of-match never rises as time passes`);
+    assert.ok(p.pNext15 <= p.pMoreGoal + 1e-9, `${m}' next 15 cannot exceed the rest of the match`);
+    assert.ok(p.reasons.every((r) => !/undefined|NaN/.test(r.detail)), `${m}' reasoning text`);
+    prevRest = p.pMoreGoal;
+  }
+  // Late added time: small but not frozen.
+  assert.ok(at(85, 'H2').pNext15 > at(93, 'H2').pNext15);
+  // Half time looks ahead to the start of the second half.
+  assert.ok(Math.abs(at(45, 'HT').pNext15 - at(45, 'H2').pNext15) < 0.02);
+  // First-half added time (45+2) is still the first half: the whole second half remains.
+  assert.ok(at(47, 'H1').pMoreGoal > at(47, 'H2').pMoreGoal);
+  // Extra time and penalties.
+  for (let m = 91; m <= 121; m++) assert.ok(at(m, 'ET').pNext15 > 0, `${m}' ET`);
+  assert.ok(at(90, 'BREAK_ET').pMoreGoal > at(110, 'ET').pMoreGoal);
+  const pen = at(120, 'PEN');
+  assert.equal(pen.pMoreGoal, 0);
+  assert.equal(pen.verdict, 'Penalty shoot-out');
+});
+
+test('window shares are consistent with the remaining share', () => {
+  for (const [m, ph] of [[10, 'H1'], [40, 'H1'], [45, 'HT'], [70, 'H2'], [100, 'ET']]) {
+    assert.ok(windowShare(m, 200, ph) <= remainingShare(m, 'in', ph) + 1e-9, `${ph} ${m}`);
+    assert.ok(windowShare(m, 5, ph) < windowShare(m, 15, ph), `${ph} ${m} grows with window`);
+  }
+});
+
+test('ESPN phase parsing', () => {
+  assert.equal(parsePhase({ period: 1, type: { name: 'STATUS_FIRST_HALF' } }), 'H1');
+  assert.equal(parsePhase({ period: 1, type: { name: 'STATUS_HALFTIME' } }), 'HT');
+  assert.equal(parsePhase({ period: 2, type: { name: 'STATUS_SECOND_HALF' } }), 'H2');
+  assert.equal(parsePhase({ period: 2, type: { name: 'STATUS_END_OF_REGULATION' } }), 'BREAK_ET');
+  assert.equal(parsePhase({ period: 3, type: { name: 'STATUS_FIRST_HALF_EXTRA_TIME' } }), 'ET');
+  assert.equal(parsePhase({ period: 5, type: { name: 'STATUS_SHOOTOUT' } }), 'PEN');
+  assert.equal(parseMinute({ period: 1, displayClock: "45'+2'" }), 47);
 });

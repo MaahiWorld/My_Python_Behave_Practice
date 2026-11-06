@@ -16,25 +16,60 @@ export function poisson(k, lambda) {
   return p;
 }
 
-// Share of a full match's goal expectancy still to come at a given minute.
-// Roughly 45% of goals fall in the first half, 55% in the second.
-export function remainingShare(minute, state) {
+// ---- Match clock ----
+// Phases: H1 first half, HT half time, H2 second half, BREAK_ET break before extra time,
+// ET extra time, PEN penalty shoot-out. About 45% of goals come in the first half and 55% in the
+// second. Halves are modelled with typical added time: first half to 47', second half to 96'.
+// Extra time is 30 minutes (+2 added) at a slightly lower scoring rate than the second half.
+const H1_END = 47, H2_END = 96, ET_END = 122;
+const RATE_H1 = 0.45 / H1_END, RATE_H2 = 0.55 / (H2_END - 45), RATE_ET = 0.0095;
+export const phaseOf = (match) => {
+  if (match.state !== 'in') return null;
+  if (match.phase) return match.phase;
+  const m = match.minute || 0;
+  return match.detail === 'HT' ? 'HT' : m <= 45 ? 'H1' : m <= 100 ? 'H2' : 'ET';
+};
+const rem1 = (m) => RATE_H1 * Math.max(0, H1_END - m) + 0.55;
+const rem2 = (m) => RATE_H2 * Math.max(0, H2_END - Math.max(45, m));
+const remET = (m) => RATE_ET * Math.max(0, ET_END - Math.max(90, m));
+
+// Share of a full match's goal expectancy still to come.
+export function remainingShare(minute, state, phase) {
   if (state === 'pre') return 1;
   if (state === 'post') return 0;
-  const m = clamp(minute || 0, 0, 120);
-  let share;
-  if (m < 45) share = ((45 - m) / 45) * 0.45 + 0.55;
-  else share = (Math.max(0, 90 - m) / 45) * 0.55;
-  // Stoppage time is still to be played while the match is live.
-  return Math.max(share, 0.025);
+  const m = clamp(minute || 0, 0, 130);
+  switch (phase || (m <= 45 ? 'H1' : m <= 100 ? 'H2' : 'ET')) {
+    case 'H1': return rem1(m);
+    case 'HT': return 0.55;
+    case 'H2': return Math.max(rem2(m), RATE_H2); // at least ~1 minute of added time
+    case 'BREAK_ET': return remET(90);
+    case 'ET': return Math.max(remET(m), RATE_ET);
+    default: return 0; // PEN: shoot-out goals are not match goals
+  }
 }
 
-// Share of a full match's goal expectancy that falls between minute m and m + n.
-export function windowShare(minute, n) {
-  const m = clamp(minute || 0, 0, 120);
-  const after = m + n >= 90 ? 0 : remainingShare(m + n, 'in');
-  return Math.max(0, remainingShare(m, 'in') - after);
+// Share of a full match's goal expectancy in the next n minutes of play.
+export function windowShare(minute, n, phase) {
+  const m = clamp(minute || 0, 0, 130);
+  switch (phase || (m <= 45 ? 'H1' : m <= 100 ? 'H2' : 'ET')) {
+    case 'H1': return m + n <= H1_END ? rem1(m) - rem1(m + n) : rem1(m) - 0.55 + (0.55 - rem2(45 + (m + n - H1_END)));
+    case 'HT': return 0.55 - rem2(45 + n);
+    case 'H2': return m + n >= H2_END ? remainingShare(m, 'in', 'H2') : rem2(m) - rem2(m + n);
+    case 'BREAK_ET': return remET(90) - remET(90 + n);
+    case 'ET': return m + n >= ET_END ? remainingShare(m, 'in', 'ET') : remET(m) - remET(m + n);
+    default: return 0;
+  }
 }
+
+const PHASE_TEXT = {
+  H1: (m) => `${m} minutes played in the first half. The rest of this half and the whole second half are still to come`,
+  HT: () => 'Half time. The whole second half is still to come, and it usually produces more goals than the first',
+  H2: (m) => (m >= 90 ? `${m} minutes played: we're in added time, so only a minute or two of play is likely left`
+    : `${m} minutes played in the second half; about ${H2_END - m} minutes remain including typical added time`),
+  BREAK_ET: () => 'Normal time has ended level and 30 minutes of extra time are about to start',
+  ET: (m) => `${m} minutes played, in extra time; about ${Math.max(1, ET_END - m)} minutes remain`,
+  PEN: () => 'The match has gone to a penalty shoot-out. Shoot-out penalties are not counted as match goals',
+};
 
 // Attack / defence multipliers (1.0 = league average) from table + form.
 export function teamStrength(team, leagueAvg = DEFAULT_LEAGUE_AVG) {
@@ -206,12 +241,13 @@ export function predict(match, detail = {}) {
   // 4. Time left.
   const live = match.state === 'in';
   const minute = live ? match.minute || 0 : 0;
-  const share = remainingShare(minute, match.state);
+  const phase = phaseOf(match);
+  const share = remainingShare(minute, match.state, phase);
   if (live) {
     step({
       key: 'time', title: 'Time remaining',
-      short: `${Math.max(0, 90 - minute)} min + stoppage left`,
-      detail: `${minute} minutes played. About 45% of goals come in the first half and 55% in the second, so ${Math.round(share * 100)}% of a full match's expected goals are still to come (stoppage time included).`,
+      short: phase === 'HT' ? 'half time' : phase === 'PEN' ? 'penalty shoot-out' : phase === 'ET' || phase === 'BREAK_ET' ? 'extra time' : `${Math.max(1, 96 - minute)} min left`,
+      detail: `${PHASE_TEXT[phase](minute)}. About 45% of goals come in the first half and 55% in the second, so ${Math.round(share * 100)}% of a normal match's expected goals are still to come.`,
     }, () => { rh *= share; ra *= share; });
 
     // 5. Scoreline.
@@ -251,7 +287,8 @@ export function predict(match, detail = {}) {
     const lh = detail.liveStats?.home, la = detail.liveStats?.away;
     if (Number.isFinite(lh?.xg) && Number.isFinite(la?.xg) && minute >= 10) {
       const w = clamp(minute / 90, 0, 1) * 0.6;
-      const soFarH = fullHome * (1 - share), soFarA = fullAway * (1 - share);
+      const played = ['ET', 'BREAK_ET', 'PEN'].includes(phase) ? 1 + Math.max(0, minute - 90) / 90 : 1 - share;
+      const soFarH = fullHome * played, soFarA = fullAway * played;
       const xf = (xg, exp) => 1 + (clamp(exp > 0 ? xg / exp : 1, 0.5, 2) - 1) * w;
       const xh = xf(lh.xg, soFarH), xa = xf(la.xg, soFarA);
       step({
@@ -288,11 +325,11 @@ export function predict(match, detail = {}) {
   let pNext15 = null, expectedNext15 = null, medianNextGoal = null;
   if (live) {
     const intensity = share > 0 ? remaining / share : 0;
-    expectedNext15 = intensity * windowShare(minute, 15);
+    expectedNext15 = intensity * windowShare(minute, 15, phase);
     pNext15 = 1 - Math.exp(-expectedNext15);
     // Minutes until there is a 50% chance a goal has come (median wait), if within the match.
-    for (let n = 1; n <= Math.max(0, 95 - minute); n++) {
-      if (intensity * windowShare(minute, n) >= Math.LN2) { medianNextGoal = n; break; }
+    for (let n = 1; n <= 80; n++) {
+      if (intensity * windowShare(minute, n, phase) >= Math.LN2) { medianNextGoal = n; break; }
     }
   }
   const pMoreGoal = 1 - Math.exp(-remaining);
@@ -321,6 +358,7 @@ export function predict(match, detail = {}) {
   const mostLikelyMore = moreDist.indexOf(Math.max(...moreDist));
   let verdict;
   if (match.state === 'post') verdict = 'Full time';
+  else if (phase === 'PEN') verdict = 'Penalty shoot-out';
   else if (live && pNext15 >= 0.5) verdict = 'Goal expected soon';
   else if (pMoreGoal >= 0.75) verdict = 'Goal very likely';
   else if (pMoreGoal >= 0.55) verdict = 'Goal likely';
@@ -331,6 +369,7 @@ export function predict(match, detail = {}) {
     verdict,
     pMoreGoal,
     pNext15,
+    phase,
     expectedNext15,
     medianNextGoal,
     soonLevel: pNext15 == null ? null : pNext15 >= 0.5 ? 'hot' : pNext15 >= 0.35 ? 'warm' : 'quiet',

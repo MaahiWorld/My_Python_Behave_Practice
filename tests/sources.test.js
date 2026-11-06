@@ -23,6 +23,13 @@ test('API-Football fixture + detail parse, with xG flowing into the reasoning', 
   assert.equal(m.minute, 67);
   assert.equal(m.home.score, 1);
   assert.equal(m.leagueName, 'Premier League (England)');
+  assert.equal(m.phase, 'H2');
+  const base = { fixture: { id: 1 }, league: {}, teams: { home: { id: 1 }, away: { id: 2 } }, goals: {} };
+  assert.equal(afParseFixture({ ...base, fixture: { id: 1, status: { short: '1H', elapsed: 45, extra: 3 } } }).minute, 48);
+  assert.equal(afParseFixture({ ...base, fixture: { id: 1, status: { short: '1H', elapsed: 45, extra: 3 } } }).phase, 'H1');
+  assert.equal(afParseFixture({ ...base, fixture: { id: 1, status: { short: 'ET', elapsed: 104 } } }).phase, 'ET');
+  assert.equal(afParseFixture({ ...base, fixture: { id: 1, status: { short: 'P', elapsed: 120 } } }).phase, 'PEN');
+  assert.equal(afParseFixture({ ...base, fixture: { id: 1, status: { short: 'BT', elapsed: 90 } } }).phase, 'BREAK_ET');
 
   const fx = (h, a, hg, ag) => ({ fixture: { date: '2026-10-01' }, teams: { home: { id: h, name: 'T' + h }, away: { id: a, name: 'T' + a } }, goals: { home: hg, away: ag } });
   const d = afParseDetail(m, {

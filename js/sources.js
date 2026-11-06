@@ -69,6 +69,7 @@ async function afGet(path, key, proxy) {
   return j.response || [];
 }
 const AF_LIVE = ['1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE', 'INT', 'SUSP'];
+const AF_PHASE = { '1H': 'H1', HT: 'HT', '2H': 'H2', ET: 'ET', BT: 'BREAK_ET', P: 'PEN' };
 const AF_DONE = ['FT', 'AET', 'PEN', 'AWD', 'WO', 'CANC', 'ABD', 'PST'];
 export function afParseFixture(f) {
   const st = f.fixture?.status || {};
@@ -82,7 +83,8 @@ export function afParseFixture(f) {
     league: `af:${f.league?.id}`, leagueId: f.league?.id, season: f.league?.season,
     leagueName: [f.league?.name, f.league?.country && f.league.country !== 'World' ? `(${f.league.country})` : ''].filter(Boolean).join(' '),
     date: f.fixture?.date, state,
-    minute: state === 'in' ? (st.short === 'HT' ? 45 : (st.elapsed || 0) + (st.extra || 0)) : 0,
+    minute: state === 'in' ? (st.short === 'HT' ? 45 : st.short === 'BT' ? 90 : (st.elapsed || 0) + (st.extra || 0)) : 0,
+    phase: state === 'in' ? AF_PHASE[st.short] || null : null,
     detail: st.short === 'HT' ? 'HT' : state === 'in' ? `${st.elapsed}'` : st.short || '',
     venue: f.fixture?.venue?.name || '',
     home: team(f.teams?.home, f.goals?.home), away: team(f.teams?.away, f.goals?.away),
@@ -195,13 +197,16 @@ export function smParseFixture(f) {
   });
   const state = smState(f.state);
   const ticking = (f.periods || []).find((p) => p.ticking) || (f.periods || []).slice(-1)[0];
-  const isHT = /^HT$/.test(f.state?.developer_name || '');
-  const minute = state === 'in' ? (isHT ? 45 : num(ticking?.minutes) ?? 0) : 0;
+  const dev = f.state?.developer_name || '';
+  const isHT = dev === 'HT';
+  const phase = state !== 'in' ? null : isHT ? 'HT' : /PEN/.test(dev) ? 'PEN' : dev === 'BREAK' ? 'BREAK_ET'
+    : /ET|EXTRA_TIME/.test(dev) ? 'ET' : /2ND_HALF/.test(dev) ? 'H2' : /1ST_HALF/.test(dev) ? 'H1' : null;
+  const minute = state === 'in' ? (isHT ? 45 : phase === 'BREAK_ET' ? 90 : num(ticking?.minutes) ?? 0) : 0;
   return {
     id: String(f.id), source: 'sportmonks', league: `sm:${f.league_id ?? f.league?.id}`,
     leagueName: f.league?.name || 'League', seasonId: f.season_id,
     date: f.starting_at_timestamp ? new Date(f.starting_at_timestamp * 1000).toISOString() : f.starting_at,
-    state, minute, detail: isHT ? 'HT' : state === 'in' ? `${minute}'` : f.state?.short_name || '',
+    state, minute, phase, detail: isHT ? 'HT' : state === 'in' ? `${minute}'` : f.state?.short_name || '',
     venue: '', home: team(side('home'), 'home'), away: team(side('away'), 'away'),
   };
 }
@@ -296,6 +301,7 @@ export function fdParseMatch(x) {
   return {
     id: String(x.id), source: 'footballdata', league: `fd:${x.competition?.code}`, compCode: x.competition?.code,
     leagueName: x.competition?.name || 'Competition', date: x.utcDate, state, minute: state === 'in' ? minute : 0,
+    phase: state !== 'in' ? null : x.status === 'PAUSED' ? 'HT' : minute <= 45 ? 'H1' : 'H2',
     detail: x.status === 'PAUSED' ? 'HT' : state === 'in' ? `${minute}'` : '', venue: x.venue || '',
     home: team(x.homeTeam, x.score?.fullTime?.home), away: team(x.awayTeam, x.score?.fullTime?.away),
   };

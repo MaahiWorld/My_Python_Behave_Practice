@@ -38,7 +38,7 @@ test('clock is moved forward between infrequent list updates, capped at half tim
 });
 
 test('next-15-minute outlook is consistent with the rest-of-match chance', () => {
-  assert.ok(Math.abs(windowShare(0, 90) - 1) < 1e-9);
+  assert.ok(Math.abs(windowShare(0, 200, 'H1') - 1) < 1e-9, 'the whole match, added time included, holds all of it');
   assert.ok(windowShare(60, 15) > windowShare(10, 15), 'second-half minutes carry more goals');
   const p = predict(M({ minute: 50 }));
   assert.ok(p.pNext15 > 0.3 && p.pNext15 < p.pMoreGoal);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { marketPicks, MARKETS, outcome, recordPicks, settlePicks, trackRecord, MIN_PROB } from '../js/markets.js';
+import { marketPicks, MARKETS, outcome, recordPicks, settlePicks, trackRecord, RULES } from '../js/markets.js';
 
 const store = new Map();
 globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
@@ -28,7 +28,7 @@ test('validated picks for an attacking fixture, with every check agreeing', () =
   const o15 = picks.find((p) => p.market.id === 'o15');
   assert.ok(o15, 'Over 1.5 picked');
   assert.equal(o15.side, 'yes');
-  assert.ok(o15.p >= MIN_PROB);
+  assert.ok(o15.p >= RULES.minProb);
   assert.ok(o15.checks.length >= 3 && o15.checks.every((c) => c.ok));
   assert.deepEqual(o15.checks.map((c) => c.label), ['Season record only', 'Recent form only', 'Head to head']);
 });
@@ -45,7 +45,7 @@ test('a pick is dropped when an independent check disagrees', () => {
     form: { home: games(0, 0, 'D'), away: games(0, 1, 'L') }, leagueAvg: 1.4,
   };
   assert.equal(marketPicks(pre, split).find((p) => p.market.id === 'o15'), undefined,
-    'full model alone would give Over 1.5 ~88%, but recent form alone disagrees, so no pick');
+    'full model alone gives Over 1.5 ~85%, but recent form alone is only ~60%, below the 70% check, so no pick');
 });
 
 test('decided markets are left out of live picks', () => {

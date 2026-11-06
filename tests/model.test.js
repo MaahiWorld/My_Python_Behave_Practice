@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, remainingShare, poisson, teamStrength } from '../js/model.js';
+import { predict, remainingShare, poisson, teamStrength, PARAMS } from '../js/model.js';
 import { parseScoreboard, parseSummary, parseStandings, parseMinute, parsePhase } from '../js/api.js';
 import { demoMatches, demoDetail } from '../js/demo.js';
 
@@ -16,7 +16,7 @@ test('poisson probabilities sum to ~1', () => {
 test('remaining share falls from 1 to near 0 across a match', () => {
   assert.equal(remainingShare(0, 'pre'), 1);
   assert.equal(remainingShare(90, 'post'), 0);
-  assert.ok(Math.abs(remainingShare(45, 'in', 'HT') - 0.55) < 1e-9);
+  assert.ok(Math.abs(remainingShare(45, 'in', 'HT') - (1 - PARAMS.firstHalfShare)) < 1e-9);
   assert.ok(remainingShare(30, 'in') > remainingShare(70, 'in'));
   assert.ok(remainingShare(94, 'in') > 0);
 });
@@ -43,7 +43,7 @@ test('strong attack vs weak defence raises expected goals', () => {
   };
   const strong = predict(match(), detail);
   const neutral = predict(match());
-  assert.ok(strong.expectedMoreHome > neutral.expectedMoreHome * 1.5);
+  assert.ok(strong.expectedMoreHome > neutral.expectedMoreHome * 1.3);
   assert.ok(strong.ratings.home.attack > strong.ratings.away.attack);
   assert.ok(strong.ratings.home.defense > strong.ratings.away.defense);
 });
@@ -197,7 +197,7 @@ test('each input moves the goal scope the right way: attack/defence, recent form
   // Attacking and defending power.
   const attacking = predict(m, { table: { home: { gp: 12, gf: 30, ga: 10 }, away: { gp: 12, gf: 20, ga: 26 } } }).expectedMore;
   const defensive = predict(m, { table: { home: { gp: 12, gf: 9, ga: 7 }, away: { gp: 12, gf: 8, ga: 8 } } }).expectedMore;
-  assert.ok(attacking > base * 1.2 && defensive < base * 0.8, `${attacking} / ${base} / ${defensive}`);
+  assert.ok(attacking > base * 1.15 && defensive < base * 0.85, `${attacking} / ${base} / ${defensive}`);
 
   // Recent form on top of the season level.
   const hot = predict(m, { table: avgTable, form: { home: games(3, 2, 'W'), away: games(2, 3, 'L') } });

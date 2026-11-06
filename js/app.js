@@ -3,7 +3,7 @@ import { scanStats as espnScan } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
-import { MARKETS, MIN_PROB, MIN_CHECK, marketPicks, recordPicks, settlePicks, trackRecord } from './markets.js';
+import { MARKETS, RULES, marketPicks, recordPicks, settlePicks, trackRecord } from './markets.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -311,6 +311,19 @@ function nav(current) {
 }
 
 // ---- Goal markets page ----
+// Backtest figures (unseen seasons) from backtest/results.json, shown next to the on-device record.
+let backtest = null;
+fetch('backtest/results.json').then((r) => (r.ok ? r.json() : null)).then((j) => { backtest = j; if (route().name === 'markets') renderMarkets(); }).catch(() => {});
+function backtestLine(id) {
+  const t = backtest?.test;
+  if (!t) return '';
+  const m = t.picks.byMarket[id];
+  const base = t.highConfidenceMarkets[id];
+  const txt = m.picks
+    ? `<b>${Math.round(m.hitRate)} of 100</b> correct (${m.won.toLocaleString()} of ${m.picks.toLocaleString()} picks)${id === 'o15' ? `; Over 1.5 happens ${Math.round(base.baseline)} in 100 anyway` : ''}`
+    : `no pick reached the confidence bar in ${t.data.matches.toLocaleString()} matches, so expect this tab to be empty most of the time`;
+  return `<p class="small">Backtest on ${t.data.seasons} (${t.data.matches.toLocaleString()} past matches the model wasn't tuned on): ${txt}. <a href="https://github.com/MaahiWorld/My_Python_Behave_Practice/blob/main/backtest/RESULTS.md" target="_blank" rel="noopener">Details</a></p>`;
+}
 function renderMarkets() {
   const mk = MARKETS.find((x) => x.id === state.market) || MARKETS[1];
   const all = [];
@@ -340,12 +353,12 @@ function renderMarkets() {
   };
   view.innerHTML = `${nav('markets')}
     <div class="tabs" role="tablist">${MARKETS.map((x) => `<button class="tab" role="tab" data-market="${x.id}" aria-selected="${x.id === mk.id}">${x.id === 'btts' ? 'BTTS' : x.yes}<span class="count">${counts[x.id]}</span></button>`).join('')}</div>
-    <div class="card section record"><h3>${esc(mk.name)} · track record on this device</h3><p>${record}</p></div>
+    <div class="card section record"><h3>${esc(mk.name)} · track record</h3><p class="small">On this device: ${record}</p>${backtestLine(mk.id)}</div>
     <details class="howto"><summary>How picks are validated</summary>
       <ol>
         <li>The match prediction must be <b>high confidence</b>: season attack/defence records and recent form for both teams, plus current match stats when live.</li>
-        <li>The model must give the pick at least <b>${Math.round(MIN_PROB * 100)}%</b>.</li>
-        <li>Independent cross-checks must all agree (at least ${Math.round(MIN_CHECK * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
+        <li>The model must give the pick at least <b>${Math.round(RULES.minProb * 100)}%</b>.</li>
+        <li>Independent cross-checks must all agree (at least ${Math.round(RULES.minCheck * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
         <li>Markets already decided (e.g. Over 1.5 with two goals in) are left out.</li>
       </ol>
       <p class="muted small">Covers live matches and those starting within 3 hours on free data. Statistical estimates, not betting advice.</p>

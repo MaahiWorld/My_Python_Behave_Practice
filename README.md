@@ -27,14 +27,21 @@ available: season attacking/defensive records for both teams (5+ games), recent 
 teams (4+ matches), and for live matches from 10', current match stats for both teams. Other matches
 are hidden, with a count of how many and why; ⚙ Settings can show them if you want.
 
+## How accurate is it? (backtest)
+
+Replayed on 24,831 finished matches from 12 European leagues, tuned on 2019-20 to 2023-24 and scored
+on 2024-25 to 2026-27 (unseen): validated Goal-market picks were correct **85 times in 100**
+(1,363 of 1,601, all Over 1.5, against a natural Over 1.5 rate of 79 in 100). Full results, including
+where the model adds little, in [backtest/RESULTS.md](backtest/RESULTS.md).
+
 ## Goal markets page
 
 The **Goal markets** page lists Over 1.5, Over 2.5 and Both-teams-to-score picks (and their
 Under/No sides) for live matches and those starting within 3 hours. A pick appears only when:
 
 1. the match prediction is high confidence;
-2. the model gives it at least 75%;
-3. independent cross-checks all agree at 60%+: the season record alone, recent form alone, the
+2. the model gives it at least 80%;
+3. independent cross-checks all agree at 70%+: the season record alone, recent form alone, the
    prediction without live match stats, and head-to-head history (4+ meetings, before kick-off),
    with at least two checks required;
 4. the market isn't already decided.

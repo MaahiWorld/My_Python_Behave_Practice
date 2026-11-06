@@ -2,16 +2,16 @@
 //
 // A pick is shown only when ALL of these hold:
 //  1. The prediction's confidence is High (season records, recent form and, when live, match stats).
-//  2. The full model gives the pick at least MIN_PROB (75%).
-//  3. Every independent cross-check that has enough data agrees, at MIN_CHECK (60%) or better:
+//  2. The full model gives the pick at least RULES.minProb (80%).
+//  3. Every independent cross-check that has enough data agrees, at RULES.minCheck (70%) or better:
 //     season record alone, recent form alone, the prediction without live match stats (live
 //     matches), and head-to-head history (4+ meetings, before kick-off only).
 //  4. The market isn't already decided (e.g. Over 1.5 once two goals are in).
 // Picks are recorded on this device and marked won/lost at full time to build a track record.
 import { predict } from './model.js';
 
-export const MIN_PROB = 0.75;
-export const MIN_CHECK = 0.6;
+// Pick rules (checked by the backtest, backtest/RESULTS.md).
+export const RULES = { minProb: 0.8, minCheck: 0.7 };
 
 export const MARKETS = [
   { id: 'o15', key: 'over15', name: 'Over 1.5 goals', yes: 'Over 1.5', no: 'Under 1.5', line: 1.5 },
@@ -56,10 +56,10 @@ export function marketPicks(match, detail) {
     const p = main[mk.key];
     const yes = p >= 0.5;
     const pSide = yes ? p : 1 - p;
-    if (pSide < MIN_PROB) continue;
+    if (pSide < RULES.minProb) continue;
     const res = checks.map((c) => {
       const q = yes ? c.pred[mk.key] : 1 - c.pred[mk.key];
-      return { label: c.label, p: q, ok: q >= MIN_CHECK, txt: `${Math.round(q * 100)}%` };
+      return { label: c.label, p: q, ok: q >= RULES.minCheck, txt: `${Math.round(q * 100)}%` };
     });
     if (!live) {
       const h = h2hRate(mk, detail.h2h);

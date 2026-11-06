@@ -4,7 +4,19 @@
 // scoreline, red cards and in-game shot pressure.
 
 export const DEFAULT_LEAGUE_AVG = 1.35; // goals per team per match
-const HOME_ADV = 1.1;
+// Tunable settings. Values are fitted by the backtest (backtest/tune.js) on older seasons and
+// checked on later seasons the tuning never saw; see backtest/RESULTS.md.
+export const PARAMS = {
+  homeAdv: 1.1, // home side scores this much more, away side this much less (measured: 1.10)
+  seasonK: 16, // season record shrinkage toward average, in matches
+  formK: 12, // recent form shrinkage toward average, in matches
+  formWeight: 0.2, // weight of recent form against the season level
+  h2hWeight: 0.1, // maximum weight of head-to-head history
+  strengthPower: 0.6, // <1 tempers how far attack/defence strength moves a team from average
+  firstHalfShare: 0.445, // share of a match's goals scored in the first half (measured: 44.5%)
+  scoreTrail: 0.2, // trailing side's scoring rate rises by this per goal behind (up to 2)
+  scoreLead: 0.06, // leading side's scoring rate falls by this per goal ahead (up to 2)
+};
 const MAX_GOALS = 10;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -22,15 +34,16 @@ export function poisson(k, lambda) {
 // second. Halves are modelled with typical added time: first half to 47', second half to 96'.
 // Extra time is 30 minutes (+2 added) at a slightly lower scoring rate than the second half.
 const H1_END = 47, H2_END = 96, ET_END = 122;
-const RATE_H1 = 0.45 / H1_END, RATE_H2 = 0.55 / (H2_END - 45), RATE_ET = 0.0095;
+const RATE_ET = 0.0095;
+const h1Share = () => PARAMS.firstHalfShare, h2Share = () => 1 - PARAMS.firstHalfShare;
 export const phaseOf = (match) => {
   if (match.state !== 'in') return null;
   if (match.phase) return match.phase;
   const m = match.minute || 0;
   return match.detail === 'HT' ? 'HT' : m <= 45 ? 'H1' : m <= 100 ? 'H2' : 'ET';
 };
-const rem1 = (m) => RATE_H1 * Math.max(0, H1_END - m) + 0.55;
-const rem2 = (m) => RATE_H2 * Math.max(0, H2_END - Math.max(45, m));
+const rem1 = (m) => (h1Share() / H1_END) * Math.max(0, H1_END - m) + h2Share();
+const rem2 = (m) => (h2Share() / (H2_END - 45)) * Math.max(0, H2_END - Math.max(45, m));
 const remET = (m) => RATE_ET * Math.max(0, ET_END - Math.max(90, m));
 
 // Share of a full match's goal expectancy still to come.
@@ -40,8 +53,8 @@ export function remainingShare(minute, state, phase) {
   const m = clamp(minute || 0, 0, 130);
   switch (phase || (m <= 45 ? 'H1' : m <= 100 ? 'H2' : 'ET')) {
     case 'H1': return rem1(m);
-    case 'HT': return 0.55;
-    case 'H2': return Math.max(rem2(m), RATE_H2); // at least ~1 minute of added time
+    case 'HT': return h2Share();
+    case 'H2': return Math.max(rem2(m), h2Share() / (H2_END - 45)); // at least ~1 minute of added time
     case 'BREAK_ET': return remET(90);
     case 'ET': return Math.max(remET(m), RATE_ET);
     default: return 0; // PEN: shoot-out goals are not match goals
@@ -61,33 +74,32 @@ const PHASE_TEXT = {
 // Attack / defence multipliers (1.0 = league average). Small samples are pulled toward average.
 export function seasonStrength(t, mu = DEFAULT_LEAGUE_AVG) {
   if (!t || !(t.gp > 0)) return null;
-  const K = 4;
+  const K = PARAMS.seasonK, pw = PARAMS.strengthPower;
   return {
-    att: clamp(((t.gf / t.gp / mu) * t.gp + K) / (t.gp + K), 0.35, 2.8),
-    def: clamp(((t.ga / t.gp / mu) * t.gp + K) / (t.gp + K), 0.35, 2.8),
+    att: clamp((((t.gf / t.gp / mu) * t.gp + K) / (t.gp + K)) ** pw, 0.35, 2.8),
+    def: clamp((((t.ga / t.gp / mu) * t.gp + K) / (t.gp + K)) ** pw, 0.35, 2.8),
   };
 }
 export function formStrength(form, mu = DEFAULT_LEAGUE_AVG) {
   const f = (form || []).slice(0, 5);
   if (!f.length) return null;
-  const n = f.length, K = 2;
+  const n = f.length, K = PARAMS.formK, pw = PARAMS.strengthPower;
   const gf = f.reduce((s, g) => s + g.gf, 0), ga = f.reduce((s, g) => s + g.ga, 0);
   const pts = f.reduce((s, g) => s + (g.res === 'W' ? 3 : g.res === 'D' ? 1 : 0), 0);
   return {
-    att: clamp(((gf / n / mu) * n + K) / (n + K), 0.35, 2.8),
-    def: clamp(((ga / n / mu) * n + K) / (n + K), 0.35, 2.8),
+    att: clamp((((gf / n / mu) * n + K) / (n + K)) ** pw, 0.35, 2.8),
+    def: clamp((((ga / n / mu) * n + K) / (n + K)) ** pw, 0.35, 2.8),
     n, gf, ga, pts, results: f.map((g) => g.res).join(''),
   };
 }
 // How far recent form moves a team away from its season level (35% weight when a season record
 // exists; recent form is all we have otherwise).
-const FORM_WEIGHT = 0.35;
 function formAdjust(season, form) {
   if (!form) return { att: 1, def: 1 };
   if (!season) return { att: form.att, def: form.def };
   return {
-    att: clamp(1 + FORM_WEIGHT * (form.att / season.att - 1), 0.6, 1.6),
-    def: clamp(1 + FORM_WEIGHT * (form.def / season.def - 1), 0.6, 1.6),
+    att: clamp(1 + PARAMS.formWeight * (form.att / season.att - 1), 0.6, 1.6),
+    def: clamp(1 + PARAMS.formWeight * (form.def / season.def - 1), 0.6, 1.6),
   };
 }
 // Combined attack / defence (season level adjusted by recent form), used for the ratings bars.
@@ -213,13 +225,13 @@ export function predict(match, detail = {}) {
   };
 
   // 1. Baseline: an average match in this league.
-  rh = mu * HOME_ADV;
-  ra = mu / HOME_ADV;
+  rh = mu * PARAMS.homeAdv;
+  ra = mu / PARAMS.homeAdv;
   reasons.push({
     key: 'baseline', title: 'Starting point: an average match', delta: rh + ra, impact: 'neutral',
     short: `league average ${f2(mu * 2)} goals/match`,
     detail: `An average team in this competition scores ${f2(mu)} goals per match${detail.leagueAvg ? ' (from this season\'s table)' : ' (typical top-flight figure; no table available)'}. ` +
-      `Home sides score about 10% more and away sides about 10% less, so we start from ${f2(rh)} for ${H} and ${f2(ra)} for ${A}: ${f2(rh + ra)} goals in a full match.`,
+      `Home sides score about ${Math.round((PARAMS.homeAdv - 1) * 100)}% more and away sides about ${Math.round((1 - 1 / PARAMS.homeAdv) * 100)}% less, so we start from ${f2(rh)} for ${H} and ${f2(ra)} for ${A}: ${f2(rh + ra)} goals in a full match.`,
   });
 
   // 2. Attacking power vs defensive strength (season record).
@@ -265,7 +277,7 @@ export function predict(match, detail = {}) {
       key: 'form', title: 'Recent form',
       short: Math.abs(hot[0] - 1) < 0.03 ? 'form in line with season' : hot[0] > 1 ? hot[1] : hot[2],
       detail: `${desc(H, fH, ssH)}. ${desc(A, fA, ssA)}. ` +
-        (ssH || ssA ? `Recent form counts for ${Math.round(FORM_WEIGHT * 100)}% against the season level, so a hot or cold run shifts the picture without overriding it.`
+        (ssH || ssA ? `Recent form counts for ${Math.round(PARAMS.formWeight * 100)}% against the season level, so a hot or cold run shifts the picture without overriding it.`
           : 'With no season record, recent form sets attacking and defensive power on its own.'),
       evidence: [fH && `${H} form points: ${fH.pts}/${fH.n * 3}`, fA && `${A} form points: ${fA.pts}/${fA.n * 3}`].filter(Boolean),
     }, () => { rh *= jH.att * jA.def; ra *= jA.att * jH.def; });
@@ -277,7 +289,7 @@ export function predict(match, detail = {}) {
   // 3. Head to head.
   const h2h = h2hSummary(detail.h2h, match.home.id);
   if (h2h.n >= 2) {
-    const w = (Math.min(h2h.n, 6) / 6) * 0.25;
+    const w = (Math.min(h2h.n, 6) / 6) * PARAMS.h2hWeight;
     const modelTotal = rh + ra;
     const adj = clamp(1 + w * (h2h.avgGoals / modelTotal - 1), 0.8, 1.25);
     step({
@@ -307,8 +319,8 @@ export function predict(match, detail = {}) {
     const diff = (match.home.score || 0) - (match.away.score || 0);
     if (diff !== 0) {
       const k = Math.min(Math.abs(diff), 2);
-      const trail = 1 + 0.12 * k;
-      const lead = 1 - 0.06 * k;
+      const trail = 1 + PARAMS.scoreTrail * k;
+      const lead = 1 - PARAMS.scoreLead * k;
       const trailer = diff > 0 ? A : H;
       const leader = diff > 0 ? H : A;
       step({

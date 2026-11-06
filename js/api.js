@@ -49,10 +49,31 @@ export function proxied(url, proxy) {
   return proxy.includes('{url}') ? proxy.replace('{url}', encodeURIComponent(url)) : proxy + url;
 }
 
-async function getJSON(url, proxy) {
-  const res = await fetch(proxied(url, proxy), { cache: 'no-store' });
-  if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText}`), { status: res.status });
-  return res.json();
+// ESPN refuses bursts of requests, so at most MAX_IN_FLIGHT run at once and refused or failed
+// requests are retried after a pause. (A refusal often reaches the browser as "Failed to fetch".)
+const MAX_IN_FLIGHT = 4;
+let inFlight = 0;
+const waiting = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function slot(fn) {
+  if (inFlight >= MAX_IN_FLIGHT) await new Promise((r) => waiting.push(r));
+  inFlight++;
+  try { return await fn(); } finally { inFlight--; waiting.shift()?.(); }
+}
+async function getJSON(url, proxy, { retries = 2 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await slot(async () => {
+        const res = await fetch(proxied(url, proxy), { cache: 'no-store' });
+        if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText || 'error'}`), { status: res.status });
+        return res.json();
+      });
+    } catch (e) {
+      const retryable = !e.status || e.status === 429 || e.status >= 500; // network error, rate limit, server error
+      if (!retryable || attempt >= retries) throw e;
+      await sleep(1500 * 2 ** attempt + Math.random() * 500);
+    }
+  }
 }
 
 // Which part of the match is being played: H1, HT, H2, BREAK_ET, ET or PEN.
@@ -217,7 +238,8 @@ export function leagueAverage(rows) {
 export function parseSummary(json, match, standings = {}) {
   const hId = match.home.id;
   const aId = match.away.id;
-  const forms = json?.boxscore?.form || [];
+  // ESPN has carried recent form under different names.
+  const forms = [json?.boxscore?.form, json?.lastFiveGames, json?.form].find((x) => Array.isArray(x) && x.length) || [];
   const formFor = (id) => {
     const f = forms.find((x) => String(x.team?.id) === String(id));
     return (f?.events || []).slice(0, 5).map((ev) => parseGame(ev, id));
@@ -262,9 +284,9 @@ export async function cached(key, ttl, fn) {
   return v;
 }
 
-// Tiered scanning: every competition every 3 minutes, and every 30 seconds only those
+// Tiered scanning: every competition every 10 minutes, and every 30 seconds only those
 // with a live match or one kicking off soon.
-const FULL_SCAN_MS = 180_000;
+const FULL_SCAN_MS = 600_000;
 const BAD_KEY = 'gs:espn-bad';
 const byLeague = new Map();
 let lastFull = 0;
@@ -289,7 +311,7 @@ export async function fetchMatches({ proxy, force = false } = {}) {
     if (r.status === 'fulfilled') { byLeague.set(lg, r.value); ok++; }
     else {
       lastErr = r.reason;
-      if (r.reason?.status >= 400 && r.reason.status < 500) { bad[lg] = now; byLeague.delete(lg); }
+      if (r.reason?.status === 400 || r.reason?.status === 404) { bad[lg] = now; byLeague.delete(lg); } // unknown competition only
     }
   });
   try { localStorage.setItem(BAD_KEY, JSON.stringify(bad)); } catch { /* ignore */ }
@@ -346,5 +368,44 @@ export async function fetchDetail(match, { proxy } = {}) {
     `${BASE}/site/v2/sports/soccer/${match.league}/summary?event=${match.id}`,
     proxy
   );
-  return parseSummary(summary, match, standings);
+  const detail = parseSummary(summary, match, standings);
+  // Recent form missing from the match data: build it from each team's own fixture list.
+  for (const side of ['home', 'away']) {
+    if (detail.form[side].length >= 4) continue;
+    try {
+      const games = await teamForm(match.league, match[side].id, match.date, proxy);
+      if (games.length > detail.form[side].length) detail.form[side] = games;
+    } catch { /* keep what we have */ }
+  }
+  return detail;
+}
+
+// A team's last 5 completed matches before `before`, from ESPN's team schedule (newest first).
+export function parseSchedule(json, teamId, before) {
+  const cutoff = before ? new Date(before).getTime() : Date.now();
+  const games = [];
+  for (const e of json?.events || []) {
+    const c = e.competitions?.[0];
+    const done = c?.status?.type?.completed ?? e.status?.type?.completed ?? (c?.status?.type?.state || e.status?.type?.state) === 'post';
+    if (!done || new Date(e.date).getTime() >= cutoff) continue;
+    const cs = c?.competitors || [];
+    const me = cs.find((x) => String(x.id ?? x.team?.id) === String(teamId));
+    const opp = cs.find((x) => x !== me);
+    const score = (x) => num(x?.score?.value ?? x?.score?.displayValue ?? x?.score);
+    const gf = score(me), ga = score(opp);
+    if (!me || !opp || gf == null || ga == null) continue;
+    const homeIsMe = me.homeAway === 'home';
+    games.push({
+      gf, ga, res: gf > ga ? 'W' : gf < ga ? 'L' : 'D', home: homeIsMe, date: e.date,
+      opp: opp.team?.shortDisplayName || opp.team?.displayName || '',
+      hs: homeIsMe ? gf : ga, as: homeIsMe ? ga : gf,
+      homeId: String(homeIsMe ? teamId : opp.id ?? opp.team?.id), awayId: String(homeIsMe ? opp.id ?? opp.team?.id : teamId),
+    });
+  }
+  return games.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+}
+function teamForm(league, teamId, before, proxy) {
+  return cached(`sched:${league}:${teamId}`, 6 * 3_600_000, () =>
+    getJSON(`${BASE}/site/v2/sports/soccer/${league}/teams/${teamId}/schedule`, proxy)
+  ).then((j) => parseSchedule(j, teamId, before));
 }

@@ -81,6 +81,32 @@ async function loadMatches(force = false) {
   }
 }
 
+// Pre-match analyses are kept on the device for 6 hours, so reopening the app doesn't refetch them.
+const DETAIL_STORE = 'gs:details';
+const SAVED_MS = 6 * 3_600_000;
+(function restoreDetails() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DETAIL_STORE) || '{}');
+    for (const [k, v] of Object.entries(saved)) if (Date.now() - v.at < SAVED_MS) state.details.set(k, v);
+  } catch { /* nothing saved */ }
+})();
+let saveTimer = null;
+function saveDetailsSoon(k, entry, m) {
+  if (m.state !== 'pre' || m.league === 'demo') return;
+  pendingSaves.set(k, entry);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(DETAIL_STORE) || '{}');
+      for (const [kk, v] of pendingSaves) saved[kk] = { at: v.at, detail: { ...v.detail, lineups: { home: [], away: [] }, events: [] } };
+      for (const [kk, v] of Object.entries(saved)) if (Date.now() - v.at > SAVED_MS) delete saved[kk];
+      localStorage.setItem(DETAIL_STORE, JSON.stringify(saved));
+      pendingSaves.clear();
+    } catch { /* storage full or unavailable */ }
+  }, 1500);
+}
+const pendingSaves = new Map();
+
 async function getDetail(m, { force = false, ttl } = {}) {
   const k = keyOf(m);
   const hit = state.details.get(k);
@@ -88,7 +114,9 @@ async function getDetail(m, { force = false, ttl } = {}) {
   if (!force && hit && Date.now() - hit.at < maxAge) return hit.detail;
   const src = sourceById(m.source);
   const detail = m.league === 'demo' ? demoDetail(m) : await src.adapter.fetchDetail(m, { proxy: settings.proxy, key: keyFor(src.id) });
-  state.details.set(k, { detail, at: Date.now() });
+  const entry = { detail, at: Date.now() };
+  state.details.set(k, entry);
+  saveDetailsSoon(k, entry, m);
   return detail;
 }
 
@@ -106,20 +134,23 @@ function rerenderSoon() {
 }
 const warmable = (m) => (m.league === 'demo' || !sourceById(m.source).needsKey)
   && (m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 12 * 3_600_000));
-const detailErrors = new Map(); // match key -> error message from the last failed analysis
+const detailErrors = new Map(); // match key -> { msg, at } from the last failed analysis
+const RETRY_FAILED_MS = 3 * 60_000;
+const failedRecently = (m) => { const e = detailErrors.get(keyOf(m)); return !!e && Date.now() - e.at < RETRY_FAILED_MS; };
+const noteFailure = (m, e) => detailErrors.set(keyOf(m), { msg: e?.message || String(e), at: Date.now() });
 async function warm() {
   if (warming) return;
   warming = true;
-  const queue = state.matches.filter(warmable)
+  const queue = state.matches.filter((m) => warmable(m) && !failedRecently(m))
     .sort((a, b) => (a.state === 'in' ? 0 : 1) - (b.state === 'in' ? 0 : 1) || new Date(a.date) - new Date(b.date));
   const worker = async () => {
     while (queue.length) {
       const m = queue.shift();
-      try { await getDetail(m, { ttl: m.state === 'in' ? 60_000 : 1_800_000 }); detailErrors.delete(keyOf(m)); } catch (e) { detailErrors.set(keyOf(m), e.message || String(e)); }
+      try { await getDetail(m, { ttl: m.state === 'in' ? 60_000 : SAVED_MS }); detailErrors.delete(keyOf(m)); } catch (e) { noteFailure(m, e); }
       rerenderSoon();
     }
   };
-  try { await Promise.all([worker(), worker(), worker(), worker()]); } finally { warming = false; }
+  try { await Promise.all([worker(), worker()]); } finally { warming = false; }
   rerenderSoon();
 }
 
@@ -334,15 +365,17 @@ function loadUpcoming() {
 async function warmUpcoming() {
   if (upWarming) return;
   upWarming = true;
-  const queue = state.upcoming.filter((m) => !state.details.has(keyOf(m)) && !detailErrors.has(keyOf(m)));
+  const queue = state.upcoming.filter((m) => !state.details.has(keyOf(m)) && !failedRecently(m));
   const worker = async () => {
     while (queue.length) {
       const m = queue.shift();
-      try { await getDetail(m, { ttl: 3 * 3_600_000 }); } catch (e) { detailErrors.set(keyOf(m), e.message || String(e)); }
+      try { await getDetail(m, { ttl: SAVED_MS }); detailErrors.delete(keyOf(m)); } catch (e) { noteFailure(m, e); }
       rerenderSoon();
     }
   };
-  try { await Promise.all([worker(), worker(), worker()]); } finally { upWarming = false; }
+  try { await Promise.all([worker(), worker()]); } finally { upWarming = false; }
+  // Retry anything that failed once the pause has passed.
+  if (state.upcoming.some((m) => !state.details.has(keyOf(m)) && detailErrors.has(keyOf(m)))) setTimeout(warmUpcoming, RETRY_FAILED_MS + 1000);
 }
 // Everything the Goal markets page considers: live and soon-starting matches, plus the next 7 days
 // in the best-known competitions.
@@ -446,7 +479,7 @@ function upcomingFixtures(mk, picks) {
     ${leagues.length > 1 ? `<div class="chips">${[['all', `All (${state.upcoming.length})`], ...leagues].map(([k, l]) => `<button class="chip" data-upleague="${esc(k)}" aria-pressed="${state.upLeague === k}">${esc(l)}</button>`).join('')}</div>` : ''}
     <p class="small muted">Chance of Over 1.5 / Over 2.5 / both teams scoring for each match. ✓ marks a validated pick. Tap a match for the full reasoning.</p>
     ${html || '<p class="small muted">No high-confidence predictions here yet.</p>'}
-    <p class="small muted">${[shown && `${shown} shown`, thin && `${thin} hidden (not enough data for a high-confidence prediction)`, pending && `${pending} still being analysed…`, failed && `${failed} couldn't load their stats`].filter(Boolean).join(' · ')}</p>
+    <p class="small muted">${[shown && `${shown} shown`, thin && `${thin} hidden (not enough data for a high-confidence prediction)`, pending && `${pending} still being analysed…`, failed && `${failed} couldn't load their stats yet (retrying)`].filter(Boolean).join(' · ')}</p>
   </div>`;
 }
 
@@ -486,15 +519,19 @@ function whyNoPicks(mk) {
     [c.decided, 'already decided on the scoreboard'],
     [c.thin, 'not enough data for a high-confidence prediction'],
     [c.pending, 'still being analysed'],
-    [c.failed, 'couldn\'t load their stats'],
+    [c.failed, 'couldn\'t load their stats yet (retrying)'],
     [c.keyed, 'from API-Football (only analysed when opened, to save the free requests)'],
   ].filter(([n]) => n);
   const missing = Object.entries(c.missing).sort((a, b) => b[1] - a[1]);
+  const errs = {};
+  for (const m of cands) { const e = detailErrors.get(keyOf(m)); if (e && !state.details.has(keyOf(m))) errs[e.msg] = (errs[e.msg] || 0) + 1; }
+  const errList = Object.entries(errs).sort((a, b) => b[1] - a[1]).slice(0, 3);
   near.sort((a, b) => a.gap - b.gap);
   return `<div class="card section diag"><h3>Why ${c.picks ? 'only these' : 'no'} picks?</h3>
     <p class="small">Checked <b>${cands.length}</b> match${cands.length > 1 ? 'es' : ''} (live, kicking off today, or in the top leagues over the next 7 days):</p>
     <ul class="diag-list">${rows.map(([n, t]) => `<li><b>${n}</b> ${t}</li>`).join('')}</ul>
     ${missing.length ? `<p class="small muted">Missing data: ${missing.map(([t, n]) => `${esc(t)} (${n})`).join('; ')}.</p>` : ''}
+    ${errList.length ? `<p class="small muted">Load errors (retried automatically every few minutes): ${errList.map(([t, n]) => `“${esc(t)}” (${n})`).join('; ')}.</p>` : ''}
     ${near.length ? `<h3 style="margin-top:12px">Closest to a pick</h3><ul class="near">${near.slice(0, 5).map(({ m, e, why }) => `<li><a href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">${esc(m.home.short)} vs ${esc(m.away.short)}</a> <span class="muted">· ${esc(statusLabel(m))}</span><br><b>${esc(e.label)}</b> ${esc(why)}</li>`).join('')}</ul>` : ''}
     <p class="small muted">The bar is high on purpose: in the backtest about 1 match in 5 gave a pick, almost all Over 1.5.</p>
   </div>`;

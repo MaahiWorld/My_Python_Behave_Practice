@@ -109,3 +109,27 @@ test('football-data.org match + detail parse', () => {
   assert.equal(d.h2h[0].res, 'D');
   assert.ok(Number.isFinite(predict(m, d).pMoreGoal));
 });
+
+import { parseSchedule, parseSummary } from '../js/api.js';
+
+test('ESPN recent form is read from lastFiveGames when boxscore.form is absent', () => {
+  const match = { home: { id: '1' }, away: { id: '2' } };
+  const ev = (h, a, hs, as) => ({ homeTeamId: h, awayTeamId: a, homeTeamScore: String(hs), awayTeamScore: String(as) });
+  const d = parseSummary({ lastFiveGames: [{ team: { id: '1' }, events: [ev('1', '9', 2, 0), ev('8', '1', 1, 1), ev('1', '7', 0, 1), ev('6', '1', 0, 3)] }] }, match);
+  assert.deepEqual(d.form.home.map((g) => g.res), ['W', 'D', 'L', 'W']);
+});
+
+test('recent form can be rebuilt from a team schedule (completed games only, newest first)', () => {
+  const g = (date, done, myScore, oppScore, home = true) => ({
+    date, competitions: [{ status: { type: { completed: done } }, competitors: [
+      { id: '5', homeAway: home ? 'home' : 'away', score: { value: myScore }, team: { id: '5' } },
+      { id: '9', homeAway: home ? 'away' : 'home', score: { displayValue: String(oppScore) }, team: { id: '9', shortDisplayName: 'Opp' } }] }],
+  });
+  const json = { events: [g('2026-10-01T15:00Z', true, 2, 1), g('2026-10-08T15:00Z', true, 0, 0, false), g('2026-10-15T15:00Z', true, 1, 3),
+    g('2026-10-22T15:00Z', true, 4, 0), g('2026-10-29T15:00Z', true, 1, 2), g('2026-09-20T15:00Z', true, 3, 3), g('2026-11-20T15:00Z', false, 0, 0)] };
+  const form = parseSchedule(json, '5', '2026-11-07T15:00Z');
+  assert.equal(form.length, 5);
+  assert.deepEqual(form.map((x) => x.res), ['L', 'W', 'L', 'D', 'W']);
+  assert.equal(form[3].home, false);
+  assert.equal(form[0].opp, 'Opp');
+});

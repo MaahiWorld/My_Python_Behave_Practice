@@ -250,3 +250,31 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .step details { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .step summary { cursor: pointer; font-weight: 600; }
 .step details ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
+
+/* Data sources page */
+.page-title { margin: 4px 0 6px; font-size: 22px; }
+a.icon-btn { display: grid; place-items: center; }
+.src-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.src-head h3 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 16px; color: var(--text); }
+.src-cost { font-size: 13px; color: var(--muted); margin: 2px 0 8px; }
+.badge { font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; flex: none; }
+.badge.on { background: var(--accent); color: #04261b; }
+.badge.ready { background: var(--surface-2); color: var(--text); }
+.badge.off { background: var(--surface-2); color: var(--muted); }
+.feat { list-style: none; padding: 0; margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 5px; }
+.feat li { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--surface-2); }
+.feat li.yes::before { content: "✓ "; color: var(--accent-ink); font-weight: 800; }
+.feat li.no { color: var(--muted); }
+.feat li.no::before { content: "✗ "; color: var(--live); font-weight: 800; }
+.src a { color: var(--home); }
+.key-row { display: flex; gap: 6px; margin-top: 8px; }
+.key-input { flex: 1; min-width: 0; font: inherit; font-family: ui-monospace, monospace; font-size: 13px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); }
+.small-btn { padding: 6px 10px; font-size: 13px; }
+.src-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.btn.use { margin-top: 10px; width: 100%; }
+.test-result { margin: 8px 0 0; min-height: 0; }
+.test-result:empty { display: none; }
+.test-result.good { color: var(--accent-ink); }
+.test-result.bad { color: var(--live); }
+.src-line { text-align: center; margin: 14px 0 0; }
+.src-line a { color: var(--home); }

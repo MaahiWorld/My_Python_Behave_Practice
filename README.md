@@ -23,15 +23,34 @@ adjustment the model made.
 
 > Statistical estimates for fun and learning — not betting advice.
 
-## Data
+## Data sources
 
-Live scores, lineups, form, head-to-head and standings come from ESPN's public soccer feeds
-(no API key). About 25 competitions are tracked (top-5 European leagues, UEFA competitions, MLS,
-Liga MX, Brasileirão, and more — see `LEAGUES` in `js/api.js`).
+By default the app uses ESPN's public soccer feeds: free, no key, about 25 competitions
+(see `LEAGUES` in `js/api.js`).
 
-If live data can't be reached, the app falls back to **demo matches** so you can still explore it.
-Demo mode can also be switched on in ⚙ Settings. If your browser blocks the feed (CORS), set a
-CORS proxy in Settings, e.g. `https://corsproxy.io/?url={url}`.
+Tap **⛁ Data sources** in the header to switch to another provider. Each one has an API key field,
+a **Test** button and a **Use this source** button, and the switch takes effect immediately:
+
+| Source | Cost | Adds |
+| --- | --- | --- |
+| ESPN (default) | Free | Scores, lineups, form, H2H, tables, shots |
+| API-Football | Free 100 req/day, paid from ~$19/mo | 1,000+ leagues, xG for some leagues |
+| Sportmonks | From ~€29/mo, live xG add-on ~€199/mo | Live expected goals (xG) |
+| football-data.org | Free (delayed), live from ~€12/mo | Tables, form, H2H for 12 competitions |
+
+Keys are stored only in the browser on your device (localStorage); they are never committed to the
+repository. When a source supplies live xG, the prediction uses it in place of shots on target.
+
+If live data can't be reached, the app falls back to **demo matches**. Demo mode can also be switched
+on in ⚙ Settings. If your browser blocks a feed (CORS), set a CORS proxy in Settings, e.g.
+`https://corsproxy.io/?url={url}`.
+
+## How predictions are explained
+
+Every match screen has a **Why this prediction** section: a confidence rating listing the data used
+and missing, then each step (league baseline, attack vs defence, head to head, time left, game state,
+red cards, live xG or shot pressure) in plain English with its evidence and how many expected goals it
+adds or removes. The steps add up to the final figure.
 
 ## Run it
 
@@ -59,6 +78,7 @@ js/app.js             UI, routing, refresh loop
 js/api.js             ESPN fetchers and parsers
 js/model.js           Prediction model
 js/demo.js            Offline demo data
+js/sources.js         Paid/keyed data source adapters + registry
 sw.js                 Service worker (offline app shell)
 manifest.webmanifest  PWA manifest
 tests/                Unit tests

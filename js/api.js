@@ -15,13 +15,13 @@ export const LEAGUES = [
 const LEAGUE_NAME = Object.fromEntries(LEAGUES);
 const BASE = 'https://site.api.espn.com/apis';
 
-const num = (v) => {
+export const num = (v) => {
   const n = typeof v === 'string' ? parseFloat(v) : v;
   return Number.isFinite(n) ? n : null;
 };
 const yes = (v) => v === true || (v && typeof v === 'object' && v.didSub === true);
 
-function proxied(url, proxy) {
+export function proxied(url, proxy) {
   if (!proxy) return url;
   return proxy.includes('{url}') ? proxy.replace('{url}', encodeURIComponent(url)) : proxy + url;
 }
@@ -69,7 +69,7 @@ export function parseScoreboard(json, league) {
     const state = st.type?.state || 'pre';
     return [{
       id: String(e.id),
-      league,
+      league, source: 'espn',
       leagueName: LEAGUE_NAME[league] || json?.leagues?.[0]?.name || league,
       date: e.date,
       state,
@@ -215,7 +215,7 @@ export function parseSummary(json, match, standings = {}) {
 
 // ---- Fetching with a tiny cache ----
 const cache = new Map();
-async function cached(key, ttl, fn) {
+export async function cached(key, ttl, fn) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.t < ttl) return hit.v;
   const v = await fn();

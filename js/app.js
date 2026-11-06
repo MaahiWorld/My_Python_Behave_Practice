@@ -1,4 +1,4 @@
-import { fetchMatches, fetchDetail } from './api.js';
+import { SOURCES, sourceById } from './sources.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict } from './model.js';
 
@@ -16,7 +16,14 @@ const settings = {
   demo: store.get('demo', false),
   proxy: store.get('proxy', ''),
   refresh: store.get('refresh', 30),
+  source: store.get('source', 'espn'),
 };
+const keyFor = (id) => store.get('key:' + id, '');
+// The selected source, falling back to free ESPN if its key was removed.
+function activeSource() {
+  const src = sourceById(settings.source);
+  return src.needsKey && !keyFor(src.id) ? sourceById('espn') : src;
+}
 
 // ---- State ----
 const state = {
@@ -40,7 +47,9 @@ async function loadMatches() {
       state.matches = demoMatches();
       state.usingDemo = true;
     } else {
-      state.matches = await fetchMatches({ proxy: settings.proxy });
+      const src = activeSource();
+      state.matches = await src.adapter.fetchMatches({ proxy: settings.proxy, key: keyFor(src.id) });
+      state.source = src;
       state.usingDemo = false;
     }
     state.error = null;
@@ -63,13 +72,15 @@ async function getDetail(m, force = false) {
   const hit = state.details.get(k);
   const ttl = m.state === 'in' ? 25_000 : 600_000;
   if (!force && hit && Date.now() - hit.at < ttl) return hit.detail;
-  const detail = m.league === 'demo' ? demoDetail(m) : await fetchDetail(m, { proxy: settings.proxy });
+  const src = sourceById(m.source);
+  const detail = m.league === 'demo' ? demoDetail(m) : await src.adapter.fetchDetail(m, { proxy: settings.proxy, key: keyFor(src.id) });
   state.details.set(k, { detail, at: Date.now() });
   return detail;
 }
 
 // Pre-load analysis for live matches so the list shows real goal chances.
 async function warmLive() {
+  if (!state.usingDemo && activeSource().needsKey) return; // save paid/limited request quotas
   const live = state.matches.filter((m) => m.state === 'in');
   const queue = [...live];
   const worker = async () => {
@@ -85,6 +96,7 @@ async function warmLive() {
 // ---- Routing ----
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
+  if (h === 'sources') return { name: 'sources' };
   const m = h.match(/^m\/([^/]+)\/(.+)$/);
   return m ? { name: 'match', league: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : { name: 'list' };
 }
@@ -92,6 +104,7 @@ function route() {
 function render() {
   const r = route();
   if (r.name === 'match') renderMatch(r);
+  else if (r.name === 'sources') renderSources();
   else renderList();
 }
 
@@ -176,10 +189,12 @@ function renderList() {
   const banner = state.usingDemo
     ? `<div class="banner">${state.error && !settings.demo ? `Couldn't reach live data (${esc(state.error)}). ` : ''}Showing <b>demo matches</b>. ${settings.demo ? 'Turn off demo mode in ⚙ for real fixtures.' : 'Check your connection or set a CORS proxy in ⚙.'}</div>`
     : state.error ? `<div class="banner">Refresh failed: ${esc(state.error)}</div>` : '';
+  const srcLine = !state.usingDemo && state.source ? `<p class="muted small src-line">Data: ${esc(state.source.name)} · <a href="#/sources">change</a></p>` : '';
   view.innerHTML = `${banner}
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}<span class="count">${c[k]}</span></button>`).join('')}</div>
     ${leagues.length > 1 ? `<div class="chips">${[['all', 'All leagues'], ...leagues].map(([k, l]) => `<button class="chip" data-league="${esc(k)}" aria-pressed="${state.league === k}">${esc(l)}</button>`).join('')}</div>` : ''}
     ${body}
+    ${srcLine}
     <p class="disclaimer">Goal chances are model estimates · ~ = quick estimate before full stats load</p>`;
 }
 
@@ -369,13 +384,91 @@ function matchHTML(m, d, err) {
     <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
 }
 
+// ---- Data sources page ----
+function renderSources() {
+  const active = activeSource().id;
+  view.innerHTML = `<a class="back" href="#/">‹ All matches</a>
+    <h2 class="page-title">Data sources</h2>
+    <p class="muted small">The app uses one source at a time. ESPN is free and needs no key. To use a paid or free-with-key source,
+      paste its API key, tap <b>Test</b>, then <b>Use this source</b>. It takes effect immediately.</p>
+    <div class="banner small">🔒 Keys are saved only in this browser on this device. They are never put in the code or on GitHub.
+      Anyone using this phone's browser could see them, so don't share the device.</div>
+    ${SOURCES.map((s) => {
+      const key = keyFor(s.id);
+      const status = s.id === active ? '<span class="badge on">In use</span>'
+        : !s.needsKey || key ? '<span class="badge ready">Ready</span>' : '<span class="badge off">Needs key</span>';
+      return `<section class="card section src" data-src="${s.id}">
+        <div class="src-head"><h3>${esc(s.name)}</h3>${status}</div>
+        <div class="src-cost">${esc(s.cost)}</div>
+        <ul class="feat">${s.provides.map((f) => `<li class="yes">${esc(f)}</li>`).join('')}${(s.lacks || []).map((f) => `<li class="no">${esc(f)}</li>`).join('')}</ul>
+        <p class="muted small">${esc(s.note)}${s.signup ? ` <a href="${esc(s.signup)}" target="_blank" rel="noopener">Get a key ↗</a>` : ''}</p>
+        ${s.needsKey ? `<div class="key-row">
+            <input type="password" class="key-input" placeholder="Paste API key" value="${esc(key)}" autocomplete="off" spellcheck="false" aria-label="${esc(s.name)} API key">
+            <button class="btn small-btn" data-act="show" type="button">Show</button>
+          </div>
+          <div class="src-actions">
+            <button class="btn" data-act="save" type="button">Save</button>
+            <button class="btn" data-act="test" type="button">Test</button>
+            ${key ? '<button class="btn" data-act="remove" type="button">Remove</button>' : ''}
+          </div>` : ''}
+        ${s.id !== active && (!s.needsKey || key) ? '<button class="btn primary use" data-act="use" type="button">Use this source</button>' : ''}
+        <p class="test-result small" aria-live="polite"></p>
+      </section>`;
+    }).join('')}
+    <p class="muted small">Not supported yet: TheStatsAPI. Ask and it can be added the same way.</p>`;
+}
+
+view.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-act]');
+  const card = b?.closest('[data-src]');
+  if (!card) return;
+  const id = card.dataset.src;
+  const input = card.querySelector('.key-input');
+  const out = card.querySelector('.test-result');
+  const act = b.dataset.act;
+  if (act === 'show') { input.type = input.type === 'password' ? 'text' : 'password'; b.textContent = input.type === 'password' ? 'Show' : 'Hide'; return; }
+  if (act === 'save') { store.set('key:' + id, input.value.trim()); renderSources(); flash(id, input.value.trim() ? 'Key saved.' : 'Key cleared.'); return; }
+  if (act === 'remove') {
+    store.set('key:' + id, '');
+    if (settings.source === id) { settings.source = 'espn'; store.set('source', 'espn'); onSourceChange(); }
+    renderSources(); flash(id, 'Key removed.'); return;
+  }
+  if (act === 'use') {
+    settings.source = id; store.set('source', id); onSourceChange(); renderSources();
+    flash(id, 'Now using this source. Go back to see its matches.'); return;
+  }
+  if (act === 'test') {
+    const key = input.value.trim();
+    if (!key) { out.textContent = 'Paste a key first.'; out.className = 'test-result small bad'; return; }
+    out.textContent = 'Testing…'; out.className = 'test-result small';
+    try {
+      const msg = await sourceById(id).adapter.test({ key, proxy: settings.proxy });
+      store.set('key:' + id, key);
+      renderSources(); flash(id, `✓ ${msg}. Key saved.`);
+    } catch (err) {
+      out.textContent = `✗ ${err.message === 'Failed to fetch' ? 'Could not reach the service from this browser. Try setting the CORS proxy in ⚙ Settings.' : err.message}`;
+      out.className = 'test-result small bad';
+    }
+  }
+});
+function flash(id, msg) {
+  const out = view.querySelector(`[data-src="${id}"] .test-result`);
+  if (out) { out.textContent = msg; out.className = 'test-result small good'; }
+}
+function onSourceChange() {
+  state.details.clear();
+  state.matches = [];
+  state.league = 'all';
+  loadMatches();
+}
+
 // ---- Refresh loop ----
 let timer = null;
 async function refresh(full = true) {
   await loadMatches();
   const r = route();
   if (r.name === 'list') { renderList(); warmLive(); }
-  else renderMatch(r, !full);
+  else if (r.name === 'match') renderMatch(r, !full);
 }
 function schedule() {
   clearInterval(timer);
@@ -394,6 +487,7 @@ $('#settings-btn').addEventListener('click', () => {
   $('#opt-refresh').value = String(settings.refresh);
   dlg.showModal();
 });
+$('#sources-link').addEventListener('click', () => dlg.close());
 dlg.addEventListener('close', () => {
   if (dlg.returnValue !== 'save') return;
   settings.demo = $('#opt-demo').checked;

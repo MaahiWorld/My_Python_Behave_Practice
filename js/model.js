@@ -123,7 +123,8 @@ function confidence(match, detail, h2h) {
   else missing.push('enough head-to-head history');
   if (match.state === 'in') {
     const ls = detail.liveStats?.home;
-    if (ls && Number.isFinite(ls.shotsOnTarget)) have.push('live shot data');
+    if (ls && Number.isFinite(ls.xg)) have.push('live xG');
+    else if (ls && Number.isFinite(ls.shotsOnTarget)) have.push('live shot data');
     else missing.push('live shot data');
   }
   const score = have.length / (have.length + missing.length);
@@ -225,8 +226,8 @@ export function predict(match, detail = {}) {
     }
 
     // 6. Red cards.
-    const redH = match.home.redCards || 0;
-    const redA = match.away.redCards || 0;
+    const redH = Math.max(match.home.redCards || 0, detail.redCards?.home || 0);
+    const redA = Math.max(match.away.redCards || 0, detail.redCards?.away || 0);
     if (redH || redA) {
       step({
         key: 'red', title: 'Red cards',
@@ -239,19 +240,34 @@ export function predict(match, detail = {}) {
       });
     }
 
-    // 7. Live shot pressure.
+    // 7. Live chance quality: expected goals (xG) when the source has it, otherwise shots on target.
     const lh = detail.liveStats?.home, la = detail.liveStats?.away;
-    const ph = pressureFactor(lh, minute);
-    const pa = pressureFactor(la, minute);
-    if (ph !== 1 || pa !== 1) {
-      const pace = (s) => (s.shotsOnTarget / minute * 90).toFixed(1);
+    if (Number.isFinite(lh?.xg) && Number.isFinite(la?.xg) && minute >= 10) {
+      const w = clamp(minute / 90, 0, 1) * 0.6;
+      const soFarH = fullHome * (1 - share), soFarA = fullAway * (1 - share);
+      const xf = (xg, exp) => 1 + (clamp(exp > 0 ? xg / exp : 1, 0.5, 2) - 1) * w;
+      const xh = xf(lh.xg, soFarH), xa = xf(la.xg, soFarA);
       step({
-        key: 'pressure', title: 'Live attacking pressure',
-        short: ph * pa >= 1 ? 'shots on target above normal pace' : 'few shots on target so far',
-        detail: `Shots on target are the best live sign of chances being created. ${H} have ${lh.shotsOnTarget} (on pace for ${pace(lh)} per 90) and ${A} have ${la?.shotsOnTarget ?? 0} (${la ? pace(la) : '0.0'} per 90); a typical side manages about 4.5. ` +
-          `The further into the match, the more this is trusted: ${H} ×${f2(ph)}, ${A} ×${f2(pa)}.`,
-        evidence: [lh?.shots != null && `Total shots ${lh.shots}–${la?.shots ?? 0}`, lh?.possession != null && `Possession ${lh.possession}%–${la?.possession ?? 0}%`].filter(Boolean),
-      }, () => { rh *= ph; ra *= pa; });
+        key: 'xg', title: 'Live chance quality (xG)',
+        short: xh * xa >= 1 ? 'creating better chances than expected' : 'chances below expected so far',
+        detail: `Expected goals (xG) rates every chance by how often similar chances are scored, so it shows how dangerous a team has really been. ` +
+          `So far ${H} have ${f2(lh.xg)} xG (the model expected about ${f2(soFarH)} by now) and ${A} have ${f2(la.xg)} xG (expected ${f2(soFarA)}). ` +
+          `Teams creating more than expected tend to keep doing so; this is trusted more as the match goes on: ${H} ×${f2(xh)}, ${A} ×${f2(xa)}.`,
+        evidence: [lh.shotsOnTarget != null && `Shots on target ${lh.shotsOnTarget}–${la.shotsOnTarget ?? 0}`, lh.possession != null && `Possession ${lh.possession}%–${la.possession ?? 0}%`].filter(Boolean),
+      }, () => { rh *= xh; ra *= xa; });
+    } else {
+      const ph = pressureFactor(lh, minute);
+      const pa = pressureFactor(la, minute);
+      if (ph !== 1 || pa !== 1) {
+        const pace = (s) => (s.shotsOnTarget / minute * 90).toFixed(1);
+        step({
+          key: 'pressure', title: 'Live attacking pressure',
+          short: ph * pa >= 1 ? 'shots on target above normal pace' : 'few shots on target so far',
+          detail: `Shots on target are the best live sign of chances being created. ${H} have ${lh.shotsOnTarget} (on pace for ${pace(lh)} per 90) and ${A} have ${la?.shotsOnTarget ?? 0} (${la ? pace(la) : '0.0'} per 90); a typical side manages about 4.5. ` +
+            `The further into the match, the more this is trusted: ${H} ×${f2(ph)}, ${A} ×${f2(pa)}.`,
+          evidence: [lh?.shots != null && `Total shots ${lh.shots}–${la?.shots ?? 0}`, lh?.possession != null && `Possession ${lh.possession}%–${la?.possession ?? 0}%`].filter(Boolean),
+        }, () => { rh *= ph; ra *= pa; });
+      }
     }
   }
   if (match.state === 'post') { rh = 0; ra = 0; }

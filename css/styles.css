@@ -333,3 +333,14 @@ a.icon-btn { display: grid; place-items: center; }
 .diag p { margin: 0 0 6px; }
 .diag-list, .near { margin: 0 0 8px; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; }
 .near a { color: var(--home); font-weight: 600; }
+.fixtures .chips { margin-bottom: 4px; }
+.fx-day { margin: 12px 0 4px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.fx { display: grid; grid-template-columns: 44px 1fr; gap: 2px 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.fx-time { font-size: 12.5px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; grid-row: span 2; }
+.fx-teams { font-size: 14px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-teams .lg-line { display: block; font-weight: 500; }
+.fx-ps { display: flex; gap: 4px; flex-wrap: wrap; }
+.fx-p { font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 6px; background: var(--surface-2); }
+.fx-p small { font-weight: 600; color: var(--muted); margin-right: 3px; }
+.fx-p.sel { outline: 1.5px solid var(--text); }
+.fx-p.fx-pick { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); color: var(--accent-ink); }

@@ -1,5 +1,5 @@
 import { SOURCES, sourceById, afQuota } from './sources.js';
-import { scanStats as espnScan } from './api.js';
+import { scanStats as espnScan, fetchUpcoming } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
@@ -31,7 +31,10 @@ const state = {
   matches: [],
   tab: store.get('tab', 'live'),
   sort: store.get('sort', 'chance'),
-  market: store.get('market', 'o25'),
+  market: store.get('market', 'o15'),
+  upcoming: [], // next 7 days in the best-known competitions (Goal markets page)
+  upcomingAt: 0,
+  upLeague: 'all',
   league: 'all',
   details: new Map(), // key -> { detail, at }
   error: null,
@@ -133,7 +136,7 @@ function render() {
   const r = route();
   if (r.name === 'match') renderMatch(r);
   else if (r.name === 'sources') renderSources();
-  else if (r.name === 'markets') { renderMarkets(); warm(); }
+  else if (r.name === 'markets') { renderMarkets(); warm(); loadUpcoming(); }
   else renderList();
 }
 
@@ -154,7 +157,9 @@ function statusLabel(m) {
     return `${m.estimatedClock ? '≈' : ''}${clock}'${ph === 'ET' ? ' ET' : ''}`;
   }
   if (m.state === 'post') return 'FT';
-  return new Date(m.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const d = new Date(m.date);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
 }
 const reds = (n) => '<span class="red-card" title="Red card"></span>'.repeat(n || 0);
 const predFor = (m) => predict(m, state.details.get(keyOf(m))?.detail);
@@ -301,6 +306,8 @@ view.addEventListener('click', (e) => {
   if (t) { state.tab = t.dataset.tab; state.league = 'all'; store.set('tab', state.tab); renderList(); return; }
   const l = e.target.closest('[data-league]');
   if (l) { state.league = l.dataset.league; renderList(); return; }
+  const ul = e.target.closest('[data-upleague]');
+  if (ul) { state.upLeague = ul.dataset.upleague; renderMarkets(); return; }
   const mt = e.target.closest('[data-market]');
   if (mt) { state.market = mt.dataset.market; store.set('market', state.market); renderMarkets(); return; }
   const so = e.target.closest('[data-sort]');
@@ -309,6 +316,41 @@ view.addEventListener('click', (e) => {
 
 function nav(current) {
   return `<nav class="nav"><a href="#/" ${current === 'list' ? 'aria-current="page"' : ''}>Matches</a><a href="#/markets" ${current === 'markets' ? 'aria-current="page"' : ''}>Goal markets</a></nav>`;
+}
+
+// ---- Upcoming fixtures (next 7 days, best-known competitions) ----
+let upLoading = false, upWarming = false, upPromise = null;
+function loadUpcoming() {
+  if (upPromise) return upPromise; // one request at a time; callers share it
+  if (state.usingDemo || Date.now() - state.upcomingAt < 30 * 60_000) { warmUpcoming(); return Promise.resolve(); }
+  upLoading = true;
+  upPromise = fetchUpcoming({ proxy: settings.proxy, days: 7 })
+    .then((list) => { state.upcoming = list; state.upcomingError = null; })
+    .catch((e) => { state.upcomingError = e.message || String(e); })
+    .finally(() => { state.upcomingAt = Date.now(); upLoading = false; upPromise = null; rerenderSoon(); warmUpcoming(); });
+  return upPromise;
+}
+// Analyses upcoming fixtures in kick-off order (free ESPN data; kept for 3 hours).
+async function warmUpcoming() {
+  if (upWarming) return;
+  upWarming = true;
+  const queue = state.upcoming.filter((m) => !state.details.has(keyOf(m)) && !detailErrors.has(keyOf(m)));
+  const worker = async () => {
+    while (queue.length) {
+      const m = queue.shift();
+      try { await getDetail(m, { ttl: 3 * 3_600_000 }); } catch (e) { detailErrors.set(keyOf(m), e.message || String(e)); }
+      rerenderSoon();
+    }
+  };
+  try { await Promise.all([worker(), worker(), worker()]); } finally { upWarming = false; }
+}
+// Everything the Goal markets page considers: live and soon-starting matches, plus the next 7 days
+// in the best-known competitions.
+function marketCandidates() {
+  const out = new Map();
+  for (const m of state.matches) if (m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 12 * 3_600_000)) out.set(keyOf(m), m);
+  for (const m of state.upcoming) if (!out.has(keyOf(m))) out.set(keyOf(m), m);
+  return [...out.values()];
 }
 
 // ---- Goal markets page ----
@@ -326,9 +368,10 @@ function backtestLine(id) {
   return `<p class="small">Backtest on ${t.data.seasons} (${t.data.matches.toLocaleString()} past matches the model wasn't tuned on): ${txt}. <a href="https://github.com/MaahiWorld/My_Python_Behave_Practice/blob/main/backtest/RESULTS.md" target="_blank" rel="noopener">Details</a></p>`;
 }
 function renderMarkets() {
-  const mk = MARKETS.find((x) => x.id === state.market) || MARKETS[1];
+  const mk = MARKETS.find((x) => x.id === state.market) || MARKETS[0];
   const all = [];
-  for (const m of state.matches) {
+  const cands = marketCandidates();
+  for (const m of cands) {
     const hit = state.details.get(keyOf(m));
     if (!hit || (m.state !== 'in' && m.state !== 'pre')) continue;
     const picks = marketPicks(m, hit.detail);
@@ -337,7 +380,7 @@ function renderMarkets() {
   }
   const counts = Object.fromEntries(MARKETS.map((x) => [x.id, all.filter((a) => a.pk.market.id === x.id).length]));
   const list = all.filter((a) => a.pk.market.id === mk.id).sort((a, b) => b.pk.p - a.pk.p);
-  const pending = state.matches.filter((m) => warmable(m) && !state.details.has(keyOf(m)) && !detailErrors.has(keyOf(m))).length;
+  const pending = cands.filter((m) => (warmable(m) || state.upcoming.includes(m)) && !state.details.has(keyOf(m)) && !detailErrors.has(keyOf(m))).length;
   const tr = trackRecord().by[mk.id];
   const record = tr.settled
     ? `<b>${tr.won} of ${tr.settled}</b> correct (${Math.round((tr.won / tr.settled) * 100)}%)${tr.pending ? ` · ${tr.pending} awaiting full time` : ''}`
@@ -362,18 +405,56 @@ function renderMarkets() {
         <li>Independent cross-checks must all agree (at least ${Math.round(RULES.minCheck * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
         <li>Markets already decided (e.g. Over 1.5 with two goals in) are left out.</li>
       </ol>
-      <p class="muted small">Covers live matches and those starting within 12 hours on free data. Statistical estimates, not betting advice.</p>
+      <p class="muted small">Covers live matches, matches starting today, and the next 7 days in the best-known competitions (free ESPN data). Statistical estimates, not betting advice.</p>
     </details>
     ${list.length ? list.map(card).join('') : `<div class="empty muted">No validated ${esc(mk.name)} picks right now.${pending ? `<br>Analysing ${pending} match${pending > 1 ? 'es' : ''}…` : ''}</div>`}
+    ${upcomingFixtures(mk, all)}
     ${whyNoPicks(mk)}
     <p class="disclaimer">Statistical estimates only — not betting advice.</p>`;
 }
 
+// Upcoming fixtures in the best-known competitions with their market predictions (high confidence only).
+function upcomingFixtures(mk, picks) {
+  if (state.usingDemo) return '';
+  if (!state.upcoming.length) {
+    return `<div class="card section"><h3>Upcoming fixtures · top leagues</h3><p class="small muted">${upLoading || !state.upcomingAt ? 'Loading the next 7 days of fixtures…' : `No fixtures found in the next 7 days${state.upcomingError ? ` (${esc(state.upcomingError)})` : ''}.`}</p></div>`;
+  }
+  const picked = new Set(picks.map((a) => `${keyOf(a.m)}|${a.pk.market.id}`));
+  const leagues = [...new Map(state.upcoming.map((m) => [m.league, m.leagueName])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const inLeague = state.upcoming.filter((m) => state.upLeague === 'all' || m.league === state.upLeague);
+  let shown = 0, thin = 0, pending = 0, failed = 0, html = '', lastDay = '';
+  for (const m of inLeague) {
+    const hit = state.details.get(keyOf(m));
+    if (!hit) { detailErrors.has(keyOf(m)) ? failed++ : pending++; continue; }
+    const p = predict(m, hit.detail);
+    if (p.confidence.level !== 'High' && !settings.showAll) { thin++; continue; }
+    shown++;
+    const day = new Date(m.date).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+    if (day !== lastDay) { html += `<div class="fx-day">${esc(day)}</div>`; lastDay = day; }
+    const cell = (x) => {
+      const v = p[x.key];
+      const isPick = picked.has(`${keyOf(m)}|${x.id}`);
+      return `<span class="fx-p ${x.id === mk.id ? 'sel' : ''} ${isPick ? 'fx-pick' : ''}" title="${esc(x.name)}"><small>${x.id === 'btts' ? 'BTTS' : x.yes.replace('Over ', 'O')}</small>${pct(v)}${isPick ? ' ✓' : ''}</span>`;
+    };
+    html += `<a class="fx" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">
+      <span class="fx-time">${new Date(m.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      <span class="fx-teams"><span class="lg-line">${esc(m.leagueName)}</span>${esc(m.home.short)} vs ${esc(m.away.short)}</span>
+      <span class="fx-ps">${MARKETS.map(cell).join('')}</span>
+    </a>`;
+  }
+  return `<div class="card section fixtures"><h3>Upcoming fixtures · top leagues · next 7 days</h3>
+    ${leagues.length > 1 ? `<div class="chips">${[['all', `All (${state.upcoming.length})`], ...leagues].map(([k, l]) => `<button class="chip" data-upleague="${esc(k)}" aria-pressed="${state.upLeague === k}">${esc(l)}</button>`).join('')}</div>` : ''}
+    <p class="small muted">Chance of Over 1.5 / Over 2.5 / both teams scoring for each match. ✓ marks a validated pick. Tap a match for the full reasoning.</p>
+    ${html || '<p class="small muted">No high-confidence predictions here yet.</p>'}
+    <p class="small muted">${[shown && `${shown} shown`, thin && `${thin} hidden (not enough data for a high-confidence prediction)`, pending && `${pending} still being analysed…`, failed && `${failed} couldn't load their stats`].filter(Boolean).join(' · ')}</p>
+  </div>`;
+}
+
 // Explains, for the chosen market, why each candidate match did or didn't produce a pick.
 function whyNoPicks(mk) {
-  const cands = state.matches.filter((m) => m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 12 * 3_600_000));
+  const cands = marketCandidates();
   if (!cands.length) {
-    return `<div class="card section diag"><h3>Why no picks?</h3><p>No matches are live or kicking off in the next 12 hours in the ${state.usingDemo ? 'demo data' : 'competitions scanned'}. Check back closer to match time.</p></div>`;
+    return `<div class="card section diag"><h3>Why no picks?</h3><p>No live or upcoming matches found${state.usingDemo ? ' in the demo data' : ''}.</p></div>`;
   }
   const c = { pending: 0, failed: 0, keyed: 0, thin: 0, missing: {}, lowProb: 0, checkFailed: 0, decided: 0, fewChecks: 0, picks: 0 };
   const near = [];
@@ -382,7 +463,7 @@ function whyNoPicks(mk) {
     const hit = state.details.get(k);
     if (!hit) {
       if (detailErrors.has(k)) c.failed++;
-      else if (!warmable(m)) c.keyed++;
+      else if (!warmable(m) && !state.upcoming.includes(m)) c.keyed++;
       else c.pending++;
       continue;
     }
@@ -411,7 +492,7 @@ function whyNoPicks(mk) {
   const missing = Object.entries(c.missing).sort((a, b) => b[1] - a[1]);
   near.sort((a, b) => a.gap - b.gap);
   return `<div class="card section diag"><h3>Why ${c.picks ? 'only these' : 'no'} picks?</h3>
-    <p class="small">Checked <b>${cands.length}</b> match${cands.length > 1 ? 'es' : ''} (live, or kicking off in the next 12 hours):</p>
+    <p class="small">Checked <b>${cands.length}</b> match${cands.length > 1 ? 'es' : ''} (live, kicking off today, or in the top leagues over the next 7 days):</p>
     <ul class="diag-list">${rows.map(([n, t]) => `<li><b>${n}</b> ${t}</li>`).join('')}</ul>
     ${missing.length ? `<p class="small muted">Missing data: ${missing.map(([t, n]) => `${esc(t)} (${n})`).join('; ')}.</p>` : ''}
     ${near.length ? `<h3 style="margin-top:12px">Closest to a pick</h3><ul class="near">${near.slice(0, 5).map(({ m, e, why }) => `<li><a href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">${esc(m.home.short)} vs ${esc(m.away.short)}</a> <span class="muted">· ${esc(statusLabel(m))}</span><br><b>${esc(e.label)}</b> ${esc(why)}</li>`).join('')}</ul>` : ''}
@@ -458,7 +539,15 @@ function lineupList(players) {
 }
 
 async function renderMatch(r, background = false) {
-  const m = state.matches.find((x) => x.league === r.league && x.id === r.id);
+  const m = state.matches.find((x) => x.league === r.league && x.id === r.id)
+    || state.upcoming.find((x) => x.league === r.league && x.id === r.id);
+  if (!m && !state.upcomingAt && !state.usingDemo) {
+    // Opened directly (e.g. after a reload) on an upcoming fixture: load the fixture list first.
+    view.innerHTML = '<div class="skeleton" style="height:180px"></div>';
+    await loadUpcoming();
+    if (route().name === 'match' && route().id === r.id) renderMatch(r, background);
+    return;
+  }
   if (!m) {
     view.innerHTML = state.loading
       ? '<div class="skeleton" style="height:180px"></div>'
@@ -690,7 +779,7 @@ async function refresh(full = true, force = false) {
   await loadMatches(force);
   const r = route();
   if (r.name === 'list') { renderList(); warm(); }
-  else if (r.name === 'markets') { renderMarkets(); warm(); }
+  else if (r.name === 'markets') { renderMarkets(); warm(); loadUpcoming(); }
   else if (r.name === 'match') renderMatch(r, !full);
 }
 function schedule() {

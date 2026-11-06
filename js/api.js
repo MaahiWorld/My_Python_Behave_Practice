@@ -303,6 +303,41 @@ export async function fetchMatches({ proxy, force = false } = {}) {
   return all;
 }
 
+// ---- Upcoming fixtures in the best-known competitions ----
+export const FAMOUS = [
+  'eng.1', 'esp.1', 'ita.1', 'ger.1', 'fra.1', 'uefa.champions', 'uefa.europa', 'uefa.europa.conf',
+  'ned.1', 'por.1', 'eng.2', 'sco.1', 'tur.1', 'bel.1', 'ksa.1', 'usa.1', 'mex.1', 'bra.1', 'arg.1',
+  'eng.fa', 'eng.league_cup', 'esp.copa_del_rey', 'ger.dfb_pokal', 'ita.coppa_italia', 'fra.coupe_de_france',
+  'conmebol.libertadores', 'uefa.nations', 'fifa.worldq.uefa', 'fifa.world', 'uefa.euro',
+];
+const ymd = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+
+// Fixtures not yet started in the next `days` days. One request per competition for the whole
+// date range; if ESPN rejects the range, falls back to one request per day.
+export async function fetchUpcoming({ proxy, days = 7 } = {}) {
+  const from = new Date(), to = new Date(Date.now() + days * 86_400_000);
+  const one = async (lg) => {
+    const url = (q) => `${BASE}/site/v2/sports/soccer/${lg}/scoreboard?dates=${q}`;
+    try {
+      return parseScoreboard(await getJSON(url(`${ymd(from)}-${ymd(to)}`), proxy), lg);
+    } catch (e) {
+      if (!(e.status >= 400 && e.status < 500)) throw e;
+      const out = [];
+      for (let i = 0; i <= days; i++) {
+        try { out.push(...parseScoreboard(await getJSON(url(ymd(new Date(Date.now() + i * 86_400_000))), proxy), lg)); } catch { /* skip day */ }
+      }
+      return out;
+    }
+  };
+  const leagues = FAMOUS.filter((s) => !bad[s]);
+  const results = await Promise.allSettled(leagues.map((lg) => cached(`up:${lg}:${ymd(from)}`, 30 * 60_000, () => one(lg))));
+  const seen = new Set();
+  return results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+    .filter((m) => m.state === 'pre' && new Date(m.date) - Date.now() < days * 86_400_000)
+    .filter((m) => (seen.has(m.league + m.id) ? false : seen.add(m.league + m.id)))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
 export async function fetchDetail(match, { proxy } = {}) {
   const standings = await cached(`st:${match.league}`, 3_600_000, () =>
     getJSON(`${BASE}/v2/sports/soccer/${match.league}/standings`, proxy).then(parseStandings).catch(() => ({}))

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GoalScope</title>
+  <meta name="description" content="Live football match scanner with goal predictions from attack, defence, form, lineups and head-to-head.">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">
+      <img src="icons/icon.svg" alt="" width="28" height="28">
+      <span>GoalScope</span>
+    </a>
+    <div class="top-actions">
+      <span id="updated" class="muted small"></span>
+      <button id="refresh" class="icon-btn" aria-label="Refresh">⟳</button>
+      <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+
+  <main id="view" aria-live="polite"></main>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings-form">
+      <h2>Settings</h2>
+      <label class="row">
+        <input type="checkbox" id="opt-demo">
+        <span>Demo mode <span class="muted small">(sample matches, works offline)</span></span>
+      </label>
+      <label class="stack">
+        <span>CORS proxy <span class="muted small">(optional — only if live data is blocked in your browser)</span></span>
+        <input type="text" id="opt-proxy" placeholder="e.g. https://corsproxy.io/?url={url}" autocomplete="off">
+      </label>
+      <label class="stack">
+        <span>Auto-refresh</span>
+        <select id="opt-refresh">
+          <option value="30">Every 30 seconds</option>
+          <option value="60">Every minute</option>
+          <option value="0">Off</option>
+        </select>
+      </label>
+      <p class="muted small">Predictions are statistical estimates for fun and learning — not betting advice.</p>
+      <div class="dialog-actions">
+        <button value="save" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

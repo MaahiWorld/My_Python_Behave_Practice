@@ -1,0 +1,11 @@
+{
+  "name": "goalscope",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Installable web app that scans live football matches and predicts goals.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node --test tests/*.test.js"
+  }
+}

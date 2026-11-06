@@ -37,10 +37,14 @@ function h2hRate(market, h2h) {
   return { p: hits / games.length, txt: `${hits}/${games.length} past meetings` };
 }
 
-export function marketPicks(match, detail) {
-  if (!detail || match.state === 'post') return [];
-  const main = predict(match, detail);
-  if (main.confidence.level !== 'High' || main.phase === 'PEN') return [];
+// Evaluates every market for a match and says why each one is, or isn't, a pick.
+// status: 'pick' | 'decided' | 'low-confidence' | 'low-prob' | 'check-failed' | 'few-checks' | 'finished'
+export function evaluateMarkets(match, detail) {
+  if (match.state === 'post') return MARKETS.map((market) => ({ market, status: 'finished' }));
+  const main = predict(match, detail || {});
+  if (main.confidence.level !== 'High' || main.phase === 'PEN') {
+    return MARKETS.map((market) => ({ market, status: 'low-confidence', missing: main.confidence.missing, p: main[market.key] }));
+  }
   const live = match.state === 'in';
   const t = detail.table || {};
   const checks = [];
@@ -50,13 +54,13 @@ export function marketPicks(match, detail) {
     checks.push({ label: 'Without match stats', pred: predict(match, { ...detail, liveStats: null }) });
   }
   const hs = match.home.score || 0, as = match.away.score || 0;
-  const picks = [];
-  for (const mk of MARKETS) {
-    if (live && settledEarly(mk, hs, as)) continue;
+  return MARKETS.map((mk) => {
+    if (live && settledEarly(mk, hs, as)) return { market: mk, status: 'decided' };
     const p = main[mk.key];
     const yes = p >= 0.5;
     const pSide = yes ? p : 1 - p;
-    if (pSide < RULES.minProb) continue;
+    const base = { market: mk, side: yes ? 'yes' : 'no', label: yes ? mk.yes : mk.no, p: pSide, pred: main };
+    if (pSide < RULES.minProb) return { ...base, status: 'low-prob' };
     const res = checks.map((c) => {
       const q = yes ? c.pred[mk.key] : 1 - c.pred[mk.key];
       return { label: c.label, p: q, ok: q >= RULES.minCheck, txt: `${Math.round(q * 100)}%` };
@@ -68,13 +72,15 @@ export function marketPicks(match, detail) {
         res.push({ label: 'Head to head', p: q, ok: q >= 0.5, txt: h.txt });
       }
     }
-    if (res.length < 2 || !res.every((r) => r.ok)) continue; // must be confirmed by at least two independent checks
-    picks.push({
-      market: mk, side: yes ? 'yes' : 'no', label: yes ? mk.yes : mk.no, p: pSide,
-      level: pSide >= 0.85 ? 'Very high' : 'High', checks: res, pred: main,
-    });
-  }
-  return picks;
+    if (res.length < 2) return { ...base, status: 'few-checks', checks: res };
+    if (!res.every((r) => r.ok)) return { ...base, status: 'check-failed', checks: res, failed: res.filter((r) => !r.ok) };
+    return { ...base, status: 'pick', checks: res, level: pSide >= 0.85 ? 'Very high' : 'High' };
+  });
+}
+
+export function marketPicks(match, detail) {
+  if (!detail) return [];
+  return evaluateMarkets(match, detail).filter((e) => e.status === 'pick');
 }
 
 // ---- Track record (stored on this device) ----

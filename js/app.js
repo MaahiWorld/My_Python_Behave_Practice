@@ -3,7 +3,7 @@ import { scanStats as espnScan } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
-import { MARKETS, RULES, marketPicks, recordPicks, settlePicks, trackRecord } from './markets.js';
+import { MARKETS, RULES, marketPicks, evaluateMarkets, recordPicks, settlePicks, trackRecord } from './markets.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -89,7 +89,7 @@ async function getDetail(m, { force = false, ttl } = {}) {
   return detail;
 }
 
-// Pre-load full analysis on free sources for live matches and those kicking off within 3 hours,
+// Pre-load full analysis on free sources for live matches and those kicking off within 12 hours,
 // so confidence can be judged. Limited-quota sources are only fetched when you open a match.
 let warming = false;
 let rerenderTimer = null;
@@ -102,7 +102,8 @@ function rerenderSoon() {
   }, 700);
 }
 const warmable = (m) => (m.league === 'demo' || !sourceById(m.source).needsKey)
-  && (m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 3 * 3_600_000));
+  && (m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 12 * 3_600_000));
+const detailErrors = new Map(); // match key -> error message from the last failed analysis
 async function warm() {
   if (warming) return;
   warming = true;
@@ -111,7 +112,7 @@ async function warm() {
   const worker = async () => {
     while (queue.length) {
       const m = queue.shift();
-      try { await getDetail(m, { ttl: m.state === 'in' ? 60_000 : 1_800_000 }); } catch { /* stays unconfirmed */ }
+      try { await getDetail(m, { ttl: m.state === 'in' ? 60_000 : 1_800_000 }); detailErrors.delete(keyOf(m)); } catch (e) { detailErrors.set(keyOf(m), e.message || String(e)); }
       rerenderSoon();
     }
   };
@@ -172,7 +173,7 @@ const isConfident = (m) => state.details.has(keyOf(m)) && predFor(m).confidence.
 function hiddenInfo(want) {
   if (settings.showAll || want === 'post') return { pending: 0, thin: 0 };
   const pool = state.matches.filter((m) => m.state === want && (state.league === 'all' || m.league === state.league) && !isConfident(m));
-  const pending = pool.filter((m) => !state.details.has(keyOf(m)) && warmable(m)).length;
+  const pending = pool.filter((m) => !state.details.has(keyOf(m)) && warmable(m) && !detailErrors.has(keyOf(m))).length;
   return { pending, thin: pool.length - pending };
 }
 function filtered() {
@@ -336,7 +337,7 @@ function renderMarkets() {
   }
   const counts = Object.fromEntries(MARKETS.map((x) => [x.id, all.filter((a) => a.pk.market.id === x.id).length]));
   const list = all.filter((a) => a.pk.market.id === mk.id).sort((a, b) => b.pk.p - a.pk.p);
-  const pending = state.matches.filter((m) => warmable(m) && !state.details.has(keyOf(m))).length;
+  const pending = state.matches.filter((m) => warmable(m) && !state.details.has(keyOf(m)) && !detailErrors.has(keyOf(m))).length;
   const tr = trackRecord().by[mk.id];
   const record = tr.settled
     ? `<b>${tr.won} of ${tr.settled}</b> correct (${Math.round((tr.won / tr.settled) * 100)}%)${tr.pending ? ` · ${tr.pending} awaiting full time` : ''}`
@@ -361,10 +362,61 @@ function renderMarkets() {
         <li>Independent cross-checks must all agree (at least ${Math.round(RULES.minCheck * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
         <li>Markets already decided (e.g. Over 1.5 with two goals in) are left out.</li>
       </ol>
-      <p class="muted small">Covers live matches and those starting within 3 hours on free data. Statistical estimates, not betting advice.</p>
+      <p class="muted small">Covers live matches and those starting within 12 hours on free data. Statistical estimates, not betting advice.</p>
     </details>
-    ${list.length ? list.map(card).join('') : `<div class="empty muted">No validated ${esc(mk.name)} picks right now.${pending ? `<br>Analysing ${pending} match${pending > 1 ? 'es' : ''}…` : '<br>Picks appear only when every check agrees, so quiet spells are normal.'}</div>`}
+    ${list.length ? list.map(card).join('') : `<div class="empty muted">No validated ${esc(mk.name)} picks right now.${pending ? `<br>Analysing ${pending} match${pending > 1 ? 'es' : ''}…` : ''}</div>`}
+    ${whyNoPicks(mk)}
     <p class="disclaimer">Statistical estimates only — not betting advice.</p>`;
+}
+
+// Explains, for the chosen market, why each candidate match did or didn't produce a pick.
+function whyNoPicks(mk) {
+  const cands = state.matches.filter((m) => m.state === 'in' || (m.state === 'pre' && new Date(m.date) - Date.now() < 12 * 3_600_000));
+  if (!cands.length) {
+    return `<div class="card section diag"><h3>Why no picks?</h3><p>No matches are live or kicking off in the next 12 hours in the ${state.usingDemo ? 'demo data' : 'competitions scanned'}. Check back closer to match time.</p></div>`;
+  }
+  const c = { pending: 0, failed: 0, keyed: 0, thin: 0, missing: {}, lowProb: 0, checkFailed: 0, decided: 0, fewChecks: 0, picks: 0 };
+  const near = [];
+  for (const m of cands) {
+    const k = keyOf(m);
+    const hit = state.details.get(k);
+    if (!hit) {
+      if (detailErrors.has(k)) c.failed++;
+      else if (!warmable(m)) c.keyed++;
+      else c.pending++;
+      continue;
+    }
+    const e = evaluateMarkets(m, hit.detail).find((x) => x.market.id === mk.id);
+    switch (e.status) {
+      case 'pick': c.picks++; break;
+      case 'decided': c.decided++; break;
+      case 'low-confidence': c.thin++; for (const x of e.missing) c.missing[x] = (c.missing[x] || 0) + 1; break;
+      case 'low-prob': c.lowProb++; near.push({ m, e, gap: RULES.minProb - e.p, why: `${pct(e.p)} (needs ${pct(RULES.minProb)})` }); break;
+      case 'few-checks': c.fewChecks++; break;
+      case 'check-failed': c.checkFailed++; near.push({ m, e, gap: Math.max(...e.failed.map((f) => RULES.minCheck - f.p)), why: `${pct(e.p)}, but ${e.failed.map((f) => `${f.label.toLowerCase()} ${f.txt}`).join(', ')} (checks need ${pct(RULES.minCheck)})` }); break;
+      default: break;
+    }
+  }
+  const rows = [
+    [c.picks, 'gave a validated pick'],
+    [c.lowProb, `rated below ${pct(RULES.minProb)} for ${mk.name}`],
+    [c.checkFailed, 'reached the bar, but a cross-check disagreed'],
+    [c.fewChecks, 'had too few independent checks'],
+    [c.decided, 'already decided on the scoreboard'],
+    [c.thin, 'not enough data for a high-confidence prediction'],
+    [c.pending, 'still being analysed'],
+    [c.failed, 'couldn\'t load their stats'],
+    [c.keyed, 'from API-Football (only analysed when opened, to save the free requests)'],
+  ].filter(([n]) => n);
+  const missing = Object.entries(c.missing).sort((a, b) => b[1] - a[1]);
+  near.sort((a, b) => a.gap - b.gap);
+  return `<div class="card section diag"><h3>Why ${c.picks ? 'only these' : 'no'} picks?</h3>
+    <p class="small">Checked <b>${cands.length}</b> match${cands.length > 1 ? 'es' : ''} (live, or kicking off in the next 12 hours):</p>
+    <ul class="diag-list">${rows.map(([n, t]) => `<li><b>${n}</b> ${t}</li>`).join('')}</ul>
+    ${missing.length ? `<p class="small muted">Missing data: ${missing.map(([t, n]) => `${esc(t)} (${n})`).join('; ')}.</p>` : ''}
+    ${near.length ? `<h3 style="margin-top:12px">Closest to a pick</h3><ul class="near">${near.slice(0, 5).map(({ m, e, why }) => `<li><a href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">${esc(m.home.short)} vs ${esc(m.away.short)}</a> <span class="muted">· ${esc(statusLabel(m))}</span><br><b>${esc(e.label)}</b> ${esc(why)}</li>`).join('')}</ul>` : ''}
+    <p class="small muted">The bar is high on purpose: in the backtest about 1 match in 5 gave a pick, almost all Over 1.5.</p>
+  </div>`;
 }
 
 // ---- Match view ----

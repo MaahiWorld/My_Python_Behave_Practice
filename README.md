@@ -37,7 +37,7 @@ where the model adds little, in [backtest/RESULTS.md](backtest/RESULTS.md).
 ## Goal markets page
 
 The **Goal markets** page lists Over 1.5, Over 2.5 and Both-teams-to-score picks (and their
-Under/No sides) for live matches and those starting within 3 hours. A pick appears only when:
+Under/No sides) for live matches and those starting within 12 hours. A pick appears only when:
 
 1. the match prediction is high confidence;
 2. the model gives it at least 80%;

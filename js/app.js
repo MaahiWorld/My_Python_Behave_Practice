@@ -1,6 +1,8 @@
-import { SOURCES, sourceById } from './sources.js';
+import { SOURCES, sourceById, afQuota } from './sources.js';
+import { scanStats as espnScan } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict } from './model.js';
+import { mergeMatches } from './merge.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -16,22 +18,22 @@ const settings = {
   demo: store.get('demo', false),
   proxy: store.get('proxy', ''),
   refresh: store.get('refresh', 30),
-  source: store.get('source', 'espn'),
 };
 const keyFor = (id) => store.get('key:' + id, '');
-// The selected source, falling back to free ESPN if its key was removed.
-function activeSource() {
-  const src = sourceById(settings.source);
-  return src.needsKey && !keyFor(src.id) ? sourceById('espn') : src;
-}
+const scanOn = (id) => store.get('scan:' + id, true);
+// ESPN is always scanned; keyed sources join the scan once a key is saved (and not switched off).
+const enabledSources = () => SOURCES.filter((s) => !s.needsKey || (keyFor(s.id) && scanOn(s.id)));
 
 // ---- State ----
 const state = {
   matches: [],
   tab: store.get('tab', 'live'),
+  sort: store.get('sort', 'chance'),
   league: 'all',
   details: new Map(), // key -> { detail, at }
   error: null,
+  sourceErrors: [],
+  sourceCounts: [],
   usingDemo: settings.demo,
   loading: false,
   updated: null,
@@ -39,7 +41,7 @@ const state = {
 const keyOf = (m) => `${m.league}/${m.id}`;
 
 // ---- Data ----
-async function loadMatches() {
+async function loadMatches(force = false) {
   state.loading = true;
   $('#refresh').classList.add('spin');
   try {
@@ -47,9 +49,14 @@ async function loadMatches() {
       state.matches = demoMatches();
       state.usingDemo = true;
     } else {
-      const src = activeSource();
-      state.matches = await src.adapter.fetchMatches({ proxy: settings.proxy, key: keyFor(src.id) });
-      state.source = src;
+      const srcs = enabledSources();
+      const results = await Promise.allSettled(srcs.map((s) => s.adapter.fetchMatches({ proxy: settings.proxy, key: keyFor(s.id), force })));
+      const lists = [], errors = [];
+      results.forEach((r, i) => (r.status === 'fulfilled' ? lists.push({ src: srcs[i], matches: r.value }) : errors.push(`${srcs[i].name}: ${r.reason?.message || r.reason}`)));
+      if (!lists.length) throw new Error(errors.join('; ') || 'No data source available');
+      state.matches = mergeMatches(lists);
+      state.sourceErrors = errors;
+      state.sourceCounts = lists.map(({ src, matches }) => ({ name: src.name, id: src.id, n: matches.length, live: matches.filter((m) => m.state === 'in').length }));
       state.usingDemo = false;
     }
     state.error = null;
@@ -67,30 +74,35 @@ async function loadMatches() {
   }
 }
 
-async function getDetail(m, force = false) {
+async function getDetail(m, { force = false, ttl } = {}) {
   const k = keyOf(m);
   const hit = state.details.get(k);
-  const ttl = m.state === 'in' ? 25_000 : 600_000;
-  if (!force && hit && Date.now() - hit.at < ttl) return hit.detail;
+  const maxAge = ttl ?? (m.state === 'in' ? 25_000 : 600_000);
+  if (!force && hit && Date.now() - hit.at < maxAge) return hit.detail;
   const src = sourceById(m.source);
   const detail = m.league === 'demo' ? demoDetail(m) : await src.adapter.fetchDetail(m, { proxy: settings.proxy, key: keyFor(src.id) });
   state.details.set(k, { detail, at: Date.now() });
   return detail;
 }
 
-// Pre-load analysis for live matches so the list shows real goal chances.
+// Pre-load full analysis for live matches on free sources, so the list shows data-backed chances.
+// Limited-quota sources are only fetched when you open a match.
+let warming = false;
 async function warmLive() {
-  if (!state.usingDemo && activeSource().needsKey) return; // save paid/limited request quotas
-  const live = state.matches.filter((m) => m.state === 'in');
-  const queue = [...live];
+  if (warming) return;
+  warming = true;
+  const free = (m) => m.league === 'demo' || !sourceById(m.source).needsKey;
+  const queue = state.matches.filter((m) => m.state === 'in' && free(m))
+    .sort((a, b) => Math.abs(a.minute - 50) - Math.abs(b.minute - 50));
   const worker = async () => {
     while (queue.length) {
       const m = queue.shift();
-      try { await getDetail(m); } catch { /* keep the quick estimate */ }
+      try { await getDetail(m, { ttl: 60_000 }); } catch { /* keep the quick estimate */ }
       if (route().name === 'list') patchCard(m);
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker()]);
+  try { await Promise.all([worker(), worker(), worker(), worker()]); } finally { warming = false; }
+  if (route().name === 'list') renderList();
 }
 
 // ---- Routing ----
@@ -115,11 +127,12 @@ function crest(team, lg = false) {
   return `<span class="${cls}" style="background:${esc(team.color || '#64748b')}">${esc(team.abbr)}</span>`;
 }
 function statusLabel(m) {
-  if (m.state === 'in') return m.detail === 'HT' ? 'HT' : `${m.minute}'`;
+  if (m.state === 'in') return m.detail === 'HT' ? 'HT' : `${m.estimatedClock ? '≈' : ''}${m.minute}'`;
   if (m.state === 'post') return 'FT';
   return new Date(m.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 const reds = (n) => '<span class="red-card" title="Red card"></span>'.repeat(n || 0);
+const predFor = (m) => predict(m, state.details.get(keyOf(m))?.detail);
 
 // ---- List view ----
 function counts() {
@@ -129,18 +142,30 @@ function counts() {
 }
 function filtered() {
   const want = { live: 'in', upcoming: 'pre', finished: 'post' }[state.tab];
-  return state.matches
-    .filter((m) => m.state === want && (state.league === 'all' || m.league === state.league))
-    .sort((a, b) => a.leagueName.localeCompare(b.leagueName) || new Date(a.date) - new Date(b.date));
+  const list = state.matches.filter((m) => m.state === want && (state.league === 'all' || m.league === state.league));
+  if (state.tab === 'live' && state.sort === 'chance') {
+    const score = new Map(list.map((m) => [m, predFor(m).pNext15 ?? 0]));
+    return list.sort((a, b) => score.get(b) - score.get(a));
+  }
+  if (state.tab === 'upcoming') return list.sort((a, b) => new Date(a.date) - new Date(b.date) || a.leagueName.localeCompare(b.leagueName));
+  return list.sort((a, b) => a.leagueName.localeCompare(b.leagueName) || new Date(a.date) - new Date(b.date));
 }
 
 function cardChance(m) {
   const hit = state.details.get(keyOf(m));
-  const p = predict(m, hit?.detail);
+  const p = predFor(m);
   if (m.state === 'post') return `<div class="chance"><div class="lbl">${m.home.score + m.away.score} goals</div></div>`;
+  if (m.state === 'in') {
+    return `<div class="chance ${p.soonLevel}">
+      <div class="pct">${pct(p.pNext15)}</div>
+      <div class="lbl">goal in next 15'${hit ? '' : ' ~'}</div>
+      <div class="mini-bar"><i style="width:${pct(p.pNext15)}"></i></div>
+      <div class="lbl2">rest of match ${pct(p.pMoreGoal)}</div>
+    </div>`;
+  }
   return `<div class="chance">
     <div class="pct">${pct(p.pMoreGoal)}</div>
-    <div class="lbl">${m.state === 'in' ? 'another goal' : 'any goal'}${hit ? '' : ' ~'}</div>
+    <div class="lbl">any goal${hit ? '' : ' ~'}</div>
     <div class="mini-bar"><i style="width:${pct(p.pMoreGoal)}"></i></div>
   </div>`;
 }
@@ -152,33 +177,55 @@ function whyLine(m) {
   return p.summary.length ? `<div class="why">Why: ${esc(p.summary.join(' · '))}</div>` : '';
 }
 
-function matchCard(m) {
-  return `<a class="card match" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}" data-key="${esc(keyOf(m))}">
+function matchCard(m, showLeague = false) {
+  const p = m.state === 'in' ? predFor(m) : null;
+  const hot = p?.soonLevel === 'hot' && state.details.has(keyOf(m));
+  return `<a class="card match${hot ? ' hot' : ''}" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}" data-key="${esc(keyOf(m))}" data-showleague="${showLeague ? 1 : ''}">
     <div class="status ${m.state === 'in' ? 'live' : ''}">${esc(statusLabel(m))}</div>
     <div class="teams">
+      ${showLeague ? `<div class="lg-line">${esc(m.leagueName)}</div>` : ''}
       <div class="team-line">${crest(m.home)}<span class="nm">${esc(m.home.short)}${reds(m.home.redCards)}</span><span class="sc">${m.state === 'pre' ? '' : m.home.score}</span></div>
       <div class="team-line">${crest(m.away)}<span class="nm">${esc(m.away.short)}${reds(m.away.redCards)}</span><span class="sc">${m.state === 'pre' ? '' : m.away.score}</span></div>
     </div>
     ${cardChance(m)}
+    ${hot ? `<div class="soon">⚡ Goal expected soon${p.medianNextGoal ? ` · likely within ~${p.medianNextGoal} min` : ''}</div>` : ''}
     ${whyLine(m)}
   </a>`;
 }
 
 function patchCard(m) {
   const el = view.querySelector(`[data-key="${CSS.escape(keyOf(m))}"]`);
-  if (el) el.outerHTML = matchCard(m);
+  if (el) el.outerHTML = matchCard(m, !!el.dataset.showleague);
+}
+
+function footer() {
+  if (state.usingDemo) return '';
+  const lines = state.sourceCounts.map((c) => {
+    const extra = c.id === 'espn' ? ` · ${espnScan.leagues} competitions scanned` : c.id === 'apifootball' ? ` · ${afQuota.remaining}/${afQuota.limit} free requests left today` : '';
+    return `${esc(c.name)}: ${c.live} live / ${c.n} today${extra}`;
+  });
+  for (const e of state.sourceErrors) lines.push(`⚠ ${esc(e)}`);
+  return `<p class="muted small src-line">${lines.join('<br>')}<br><a href="#/sources">Data sources</a></p>`;
 }
 
 function renderList() {
   const c = counts();
   const list = filtered();
-  const leagues = [...new Map(state.matches.map((m) => [m.league, m.leagueName])).entries()];
+  const want = { live: 'in', upcoming: 'pre', finished: 'post' }[state.tab];
+  const leagues = [...new Map(state.matches.filter((m) => m.state === want).map((m) => [m.league, m.leagueName])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
   const tabs = [['live', 'Live'], ['upcoming', 'Upcoming'], ['finished', 'Finished']];
+  const byChance = state.tab === 'live' && state.sort === 'chance';
   let body = '';
   if (state.loading && !state.matches.length) body = '<div class="skeleton"></div>'.repeat(5);
   else if (!list.length) {
-    body = `<div class="empty muted">${state.tab === 'live' ? 'No matches are live right now in the tracked leagues.' : 'Nothing here right now.'}
+    body = `<div class="empty muted">${state.tab === 'live' ? `No matches are live right now${state.usingDemo ? '' : ` across the ${espnScan.leagues}+ competitions scanned`}.` : 'Nothing here right now.'}
       ${state.tab === 'live' && c.upcoming ? '<p><button class="btn" data-tab="upcoming">See upcoming matches</button></p>' : ''}</div>`;
+  } else if (byChance) {
+    const hot = list.filter((m) => state.details.has(keyOf(m)) && predFor(m).soonLevel === 'hot');
+    const rest = list.filter((m) => !hot.includes(m));
+    if (hot.length) body += `<div class="league-head watch">⚡ Goal watch · ${hot.length} match${hot.length > 1 ? 'es' : ''} where a goal is expected soon</div>${hot.map((m) => matchCard(m, true)).join('')}`;
+    body += `<div class="league-head">${hot.length ? 'Other live matches' : 'Live matches'} · most likely goal first</div>${rest.map((m) => matchCard(m, true)).join('')}`;
   } else {
     let lastLeague = null;
     for (const m of list) {
@@ -189,20 +236,22 @@ function renderList() {
   const banner = state.usingDemo
     ? `<div class="banner">${state.error && !settings.demo ? `Couldn't reach live data (${esc(state.error)}). ` : ''}Showing <b>demo matches</b>. ${settings.demo ? 'Turn off demo mode in ⚙ for real fixtures.' : 'Check your connection or set a CORS proxy in ⚙.'}</div>`
     : state.error ? `<div class="banner">Refresh failed: ${esc(state.error)}</div>` : '';
-  const srcLine = !state.usingDemo && state.source ? `<p class="muted small src-line">Data: ${esc(state.source.name)} · <a href="#/sources">change</a></p>` : '';
   view.innerHTML = `${banner}
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}<span class="count">${c[k]}</span></button>`).join('')}</div>
-    ${leagues.length > 1 ? `<div class="chips">${[['all', 'All leagues'], ...leagues].map(([k, l]) => `<button class="chip" data-league="${esc(k)}" aria-pressed="${state.league === k}">${esc(l)}</button>`).join('')}</div>` : ''}
+    ${state.tab === 'live' ? `<div class="chips sort"><button class="chip" data-sort="chance" aria-pressed="${state.sort === 'chance'}">⚡ Most likely goal</button><button class="chip" data-sort="league" aria-pressed="${state.sort === 'league'}">By league</button></div>` : ''}
+    ${leagues.length > 1 ? `<div class="chips">${[['all', `All (${leagues.length})`], ...leagues].map(([k, l]) => `<button class="chip" data-league="${esc(k)}" aria-pressed="${state.league === k}">${esc(l)}</button>`).join('')}</div>` : ''}
     ${body}
-    ${srcLine}
-    <p class="disclaimer">Goal chances are model estimates · ~ = quick estimate before full stats load</p>`;
+    ${footer()}
+    <p class="disclaimer">Goal chances are model estimates · ~ = quick estimate before full stats load · ≈ = clock estimated between updates</p>`;
 }
 
 view.addEventListener('click', (e) => {
   const t = e.target.closest('[data-tab]');
-  if (t) { state.tab = t.dataset.tab; store.set('tab', state.tab); renderList(); return; }
+  if (t) { state.tab = t.dataset.tab; state.league = 'all'; store.set('tab', state.tab); renderList(); return; }
   const l = e.target.closest('[data-league]');
-  if (l) { state.league = l.dataset.league; renderList(); }
+  if (l) { state.league = l.dataset.league; renderList(); return; }
+  const so = e.target.closest('[data-sort]');
+  if (so) { state.sort = so.dataset.sort; store.set('sort', state.sort); renderList(); }
 });
 
 // ---- Match view ----
@@ -288,7 +337,12 @@ function matchHTML(m, d, err) {
     ? `<section class="card section"><h3>Result</h3><p>Final score ${m.home.score}–${m.away.score}. Before kick-off the model expected about
         <b>${(p.fullMatch.home + p.fullMatch.away).toFixed(1)}</b> goals (${p.fullMatch.home.toFixed(1)} – ${p.fullMatch.away.toFixed(1)}).</p></section>`
     : `<section class="card section">
-      <h3>${live ? 'Will there be another goal?' : 'Will there be goals?'}</h3>
+      ${live ? `<div class="headline ${p.soonLevel}">
+        <div class="hl-match">${esc(m.home.name)} vs ${esc(m.away.name)} · ${esc(statusLabel(m))} · ${m.home.score}–${m.away.score}</div>
+        <div class="hl-text">${p.soonLevel === 'hot' ? '⚡ A goal is expected soon.' : p.soonLevel === 'warm' ? 'A goal is possible soon.' : 'A quiet spell is more likely right now.'}
+          <b>${pct(p.pNext15)}</b> chance of a goal in the next 15 minutes${p.medianNextGoal ? `; half the time the next goal comes within <b>~${p.medianNextGoal} min</b>` : ''}.</div>
+      </div>` : ''}
+      <h3>${live ? 'Will there be another goal before full time?' : 'Will there be goals?'}</h3>
       <div class="verdict">${gauge(p.pMoreGoal)}
         <div><h2>${esc(p.verdict)}</h2>
           <div class="muted">Most likely: <b>${p.mostLikelyMore === 0 ? 'no more goals' : `${p.mostLikelyMore} more goal${p.mostLikelyMore > 1 ? 's' : ''}`}</b>
@@ -296,6 +350,7 @@ function matchHTML(m, d, err) {
         </div>
       </div>
       <div class="kpis">
+        ${live ? `<div class="kpi"><b>${pct(p.pNext15)}</b><span>goal in next 15 min</span></div>` : ''}
         <div class="kpi"><b>${p.expectedMore.toFixed(2)}</b><span>expected ${live ? 'more ' : ''}goals</span></div>
         <div class="kpi"><b>${p.expectedFinalTotal.toFixed(1)}</b><span>expected final total</span></div>
         <div class="kpi"><b>${p.expectedMoreHome.toFixed(2)} · ${p.expectedMoreAway.toFixed(2)}</b><span>${H} · ${A} xG ${live ? 'remaining' : ''}</span></div>
@@ -386,21 +441,25 @@ function matchHTML(m, d, err) {
 
 // ---- Data sources page ----
 function renderSources() {
-  const active = activeSource().id;
   view.innerHTML = `<a class="back" href="#/">‹ All matches</a>
     <h2 class="page-title">Data sources</h2>
-    <p class="muted small">The app uses one source at a time. ESPN is free and needs no key. To use a paid or free-with-key source,
-      paste its API key, tap <b>Test</b>, then <b>Use this source</b>. It takes effect immediately.</p>
+    <p class="muted small">The app scans every source that's switched on and merges the results, so a match covered by two
+      sources appears once. ESPN is free and always on. To add another source, paste its API key and tap <b>Test</b>;
+      it joins the scan straight away.</p>
     <div class="banner small">🔒 Keys are saved only in this browser on this device. They are never put in the code or on GitHub.
       Anyone using this phone's browser could see them, so don't share the device.</div>
     ${SOURCES.map((s) => {
       const key = keyFor(s.id);
-      const status = s.id === active ? '<span class="badge on">In use</span>'
-        : !s.needsKey || key ? '<span class="badge ready">Ready</span>' : '<span class="badge off">Needs key</span>';
+      const on = !s.needsKey || (key && scanOn(s.id));
+      const status = !s.needsKey ? '<span class="badge on">Always on</span>'
+        : on ? '<span class="badge on">Scanning</span>' : key ? '<span class="badge ready">Off</span>' : '<span class="badge off">Needs key</span>';
+      const quota = s.id === 'apifootball' && key ? `<p class="small quota">Free requests left today: <b>${afQuota.remaining}/${afQuota.limit}</b> (resets 00:00 UTC)</p>` : '';
+      const espnInfo = s.id === 'espn' ? `<p class="small quota">${espnScan.leagues} competitions in the scan list${espnScan.active ? ` · ${espnScan.active} with matches today` : ''}</p>` : '';
       return `<section class="card section src" data-src="${s.id}">
         <div class="src-head"><h3>${esc(s.name)}</h3>${status}</div>
         <div class="src-cost">${esc(s.cost)}</div>
         <ul class="feat">${s.provides.map((f) => `<li class="yes">${esc(f)}</li>`).join('')}${(s.lacks || []).map((f) => `<li class="no">${esc(f)}</li>`).join('')}</ul>
+        ${quota}${espnInfo}
         <p class="muted small">${esc(s.note)}${s.signup ? ` <a href="${esc(s.signup)}" target="_blank" rel="noopener">Get a key ↗</a>` : ''}</p>
         ${s.needsKey ? `<div class="key-row">
             <input type="password" class="key-input" placeholder="Paste API key" value="${esc(key)}" autocomplete="off" spellcheck="false" aria-label="${esc(s.name)} API key">
@@ -411,7 +470,7 @@ function renderSources() {
             <button class="btn" data-act="test" type="button">Test</button>
             ${key ? '<button class="btn" data-act="remove" type="button">Remove</button>' : ''}
           </div>` : ''}
-        ${s.id !== active && (!s.needsKey || key) ? '<button class="btn primary use" data-act="use" type="button">Use this source</button>' : ''}
+        ${s.needsKey && key ? `<label class="scan-toggle"><input type="checkbox" data-act="scan" ${scanOn(s.id) ? 'checked' : ''}> Include in the match scan</label>` : ''}
         <p class="test-result small" aria-live="polite"></p>
       </section>`;
     }).join('')}
@@ -427,15 +486,14 @@ view.addEventListener('click', async (e) => {
   const out = card.querySelector('.test-result');
   const act = b.dataset.act;
   if (act === 'show') { input.type = input.type === 'password' ? 'text' : 'password'; b.textContent = input.type === 'password' ? 'Show' : 'Hide'; return; }
-  if (act === 'save') { store.set('key:' + id, input.value.trim()); renderSources(); flash(id, input.value.trim() ? 'Key saved.' : 'Key cleared.'); return; }
+  if (act === 'save') { store.set('key:' + id, input.value.trim()); onSourceChange(); renderSources(); flash(id, input.value.trim() ? 'Key saved and added to the scan.' : 'Key cleared.'); return; }
   if (act === 'remove') {
     store.set('key:' + id, '');
-    if (settings.source === id) { settings.source = 'espn'; store.set('source', 'espn'); onSourceChange(); }
-    renderSources(); flash(id, 'Key removed.'); return;
+    onSourceChange(); renderSources(); flash(id, 'Key removed. This source has left the scan.'); return;
   }
-  if (act === 'use') {
-    settings.source = id; store.set('source', id); onSourceChange(); renderSources();
-    flash(id, 'Now using this source. Go back to see its matches.'); return;
+  if (act === 'scan') {
+    store.set('scan:' + id, b.checked); onSourceChange(); renderSources();
+    flash(id, b.checked ? 'Included in the scan.' : 'Left out of the scan.'); return;
   }
   if (act === 'test') {
     const key = input.value.trim();
@@ -444,7 +502,7 @@ view.addEventListener('click', async (e) => {
     try {
       const msg = await sourceById(id).adapter.test({ key, proxy: settings.proxy });
       store.set('key:' + id, key);
-      renderSources(); flash(id, `✓ ${msg}. Key saved.`);
+      onSourceChange(); renderSources(); flash(id, `✓ ${msg}. Key saved and added to the scan.`);
     } catch (err) {
       out.textContent = `✗ ${err.message === 'Failed to fetch' ? 'Could not reach the service from this browser. Try setting the CORS proxy in ⚙ Settings.' : err.message}`;
       out.className = 'test-result small bad';
@@ -456,16 +514,14 @@ function flash(id, msg) {
   if (out) { out.textContent = msg; out.className = 'test-result small good'; }
 }
 function onSourceChange() {
-  state.details.clear();
-  state.matches = [];
   state.league = 'all';
   loadMatches();
 }
 
 // ---- Refresh loop ----
 let timer = null;
-async function refresh(full = true) {
-  await loadMatches();
+async function refresh(full = true, force = false) {
+  await loadMatches(force);
   const r = route();
   if (r.name === 'list') { renderList(); warmLive(); }
   else if (r.name === 'match') renderMatch(r, !full);
@@ -475,7 +531,7 @@ function schedule() {
   if (settings.refresh > 0) timer = setInterval(() => { if (!document.hidden) refresh(false); }, settings.refresh * 1000);
 }
 
-$('#refresh').addEventListener('click', () => { state.details.clear(); refresh(false); });
+$('#refresh').addEventListener('click', () => { state.details.clear(); refresh(false, true); });
 window.addEventListener('hashchange', render);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.updated && Date.now() - state.updated > 20_000) refresh(false); });
 

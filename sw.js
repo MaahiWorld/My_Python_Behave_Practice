@@ -1,7 +1,7 @@
 // App-shell cache. Match data always comes from the network.
-const CACHE = 'goalscope-v3';
+const CACHE = 'goalscope-v4';
 const SHELL = [
-  './', 'index.html', 'css/styles.css', 'js/app.js', 'js/api.js', 'js/model.js', 'js/demo.js', 'js/sources.js',
+  './', 'index.html', 'css/styles.css', 'js/app.js', 'js/api.js', 'js/model.js', 'js/demo.js', 'js/sources.js', 'js/merge.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

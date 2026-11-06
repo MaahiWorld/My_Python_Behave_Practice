@@ -39,8 +39,29 @@ const player = (name, jersey, pos, starter) => ({
 
 // ---------------- API-Football (api-sports.io) ----------------
 const AF = 'https://v3.football.api-sports.io';
+// Free-tier budget: 100 requests/day. The live remaining count comes from response headers.
+const QUOTA_KEY = 'gs:af-quota';
+const utcDay = () => new Date().toISOString().slice(0, 10);
+export const afQuota = (() => {
+  let q = {};
+  try { q = JSON.parse(localStorage.getItem(QUOTA_KEY) || '{}'); } catch { /* no storage */ }
+  return q.day === utcDay() ? q : { day: utcDay(), used: 0, limit: 100, remaining: 100 };
+})();
+function noteQuota(res) {
+  if (afQuota.day !== utcDay()) Object.assign(afQuota, { day: utcDay(), used: 0, remaining: afQuota.limit });
+  const lim = num(res.headers.get('x-ratelimit-requests-limit'));
+  const rem = num(res.headers.get('x-ratelimit-requests-remaining'));
+  afQuota.used++;
+  if (lim) afQuota.limit = lim;
+  afQuota.remaining = rem ?? Math.max(0, afQuota.limit - afQuota.used);
+  try { localStorage.setItem(QUOTA_KEY, JSON.stringify(afQuota)); } catch { /* ignore */ }
+}
+const AF_LIST_EVERY_MS = 10 * 60_000; // list refresh at most every 10 minutes
+const AF_RESERVE = 5; // never spend the last few requests
 async function afGet(path, key, proxy) {
+  if (afQuota.day === utcDay() && afQuota.remaining <= AF_RESERVE) throw new Error('API-Football daily free limit reached');
   const res = await fetch(proxied(AF + path, proxy), { headers: { 'x-apisports-key': key } });
+  noteQuota(res);
   if (!res.ok) throw new Error(`API-Football ${res.status}`);
   const j = await res.json();
   const errs = j.errors && (Array.isArray(j.errors) ? j.errors : Object.values(j.errors));
@@ -113,14 +134,19 @@ export function afParseDetail(match, { stats = [], lineups = [], events = [], h2
 }
 const apiFootball = {
   async fetchMatches({ key, proxy }) {
-    const list = await cached(`af:list:${today()}`, 25_000, () => afGet(`/fixtures?date=${today()}`, key, proxy));
-    return list.map(afParseFixture);
+    // One request returns every fixture of the day in 1,000+ competitions.
+    const fetchedAt = Date.now();
+    const list = await cached(`af:list:${today()}`, AF_LIST_EVERY_MS, () => afGet(`/fixtures?date=${today()}`, key, proxy).then((r) => ({ r, fetchedAt })));
+    return list.r.map((f) => ({ ...afParseFixture(f), fetchedAt: list.fetchedAt }));
   },
   async fetchDetail(m, { key, proxy }) {
     const id = m.id, g = (p) => afGet(p, key, proxy).catch(() => []);
-    const long = (k, p) => cached(`af:${k}`, 6 * 3_600_000, () => g(p));
+    // Background data is fetched once and kept for 6 hours; skipped when the daily budget runs low.
+    const rich = afQuota.remaining > 20;
+    const long = (k, p) => (rich ? cached(`af:${k}`, 6 * 3_600_000, () => g(p)) : Promise.resolve([]));
+    const live = (k, p) => cached(`af:${k}`, 3 * 60_000, () => g(p)); // live stats at most every 3 minutes
     const [stats, lineups, events, h2h, formH, formA, st] = await Promise.all([
-      g(`/fixtures/statistics?fixture=${id}`), long(`lu:${id}`, `/fixtures/lineups?fixture=${id}`), g(`/fixtures/events?fixture=${id}`),
+      live(`stats:${id}`, `/fixtures/statistics?fixture=${id}`), long(`lu:${id}`, `/fixtures/lineups?fixture=${id}`), live(`ev:${id}`, `/fixtures/events?fixture=${id}`),
       long(`h2h:${m.home.id}-${m.away.id}`, `/fixtures/headtohead?h2h=${m.home.id}-${m.away.id}&last=10`),
       long(`form:${m.home.id}`, `/fixtures?team=${m.home.id}&last=5`), long(`form:${m.away.id}`, `/fixtures?team=${m.away.id}&last=5`),
       long(`st:${m.leagueId}:${m.season}`, `/standings?league=${m.leagueId}&season=${m.season}`),
@@ -130,6 +156,8 @@ const apiFootball = {
   async test({ key, proxy }) {
     const res = await fetch(proxied(`${AF}/status`, proxy), { headers: { 'x-apisports-key': key } });
     const j = await res.json();
+    const rq = j.response?.requests;
+    if (rq) Object.assign(afQuota, { day: utcDay(), used: rq.current, limit: rq.limit_day, remaining: rq.limit_day - rq.current });
     const errs = j.errors && Object.values(j.errors);
     if (!res.ok || errs?.length) throw new Error(errs?.join('; ') || `HTTP ${res.status}`);
     const r = j.response || {};
@@ -318,24 +346,24 @@ const footballData = {
 // ---------------- Registry ----------------
 export const SOURCES = [
   {
-    id: 'espn', name: 'ESPN (public feed)', cost: 'Free', needsKey: false, adapter: { fetchMatches: espnMatches, fetchDetail: espnDetail },
+    id: 'espn', priority: 2, name: 'ESPN (public feed)', cost: 'Free', needsKey: false, adapter: { fetchMatches: espnMatches, fetchDetail: espnDetail },
     provides: ['Live scores', 'Lineups & subs', 'Form', 'Head-to-head', 'League tables', 'Shots & possession'],
-    lacks: ['Live xG'], note: 'Default. About 25 competitions. Unofficial feed, so it can change without notice.',
+    lacks: ['Live xG'], note: 'Always on. Scans about 185 competitions worldwide. Unofficial feed, so it can change without notice.',
   },
   {
-    id: 'apifootball', name: 'API-Football (api-sports.io)', cost: 'Free 100 req/day · paid from ~$19/mo', needsKey: true,
+    id: 'apifootball', priority: 3, name: 'API-Football (api-sports.io)', cost: 'Free 100 req/day · paid from ~$19/mo', needsKey: true,
     signup: 'https://dashboard.api-football.com/register', adapter: apiFootball,
     provides: ['Live scores (1,000+ leagues)', 'Lineups & subs', 'Form', 'Head-to-head', 'League tables', 'Shots & possession', 'xG (some leagues)'],
-    note: 'Each match analysis uses ~7 requests, so the free 100/day only covers light use; set auto-refresh to 1 minute or off.',
+    note: 'Adds matches ESPN does not cover. Free tier is managed for you: match list at most every 10 minutes (1 request), live stats for an opened match at most every 3 minutes, and it stops 5 requests before the daily limit.',
   },
   {
-    id: 'sportmonks', name: 'Sportmonks', cost: 'From ~€29/mo · live xG add-on ~€199/mo', needsKey: true,
+    id: 'sportmonks', priority: 1, name: 'Sportmonks', cost: 'From ~€29/mo · live xG add-on ~€199/mo', needsKey: true,
     signup: 'https://my.sportmonks.com/register', adapter: sportmonks,
     provides: ['Live scores', 'Lineups & subs', 'Form', 'Head-to-head', 'Shots & possession', 'Live xG (with xG add-on)'],
     lacks: ['League tables (not used yet)'], note: 'Best option for live expected goals. May need the CORS proxy in Settings.',
   },
   {
-    id: 'footballdata', name: 'football-data.org', cost: 'Free tier (delayed) · live from ~€12/mo', needsKey: true,
+    id: 'footballdata', priority: 4, name: 'football-data.org', cost: 'Free tier (delayed) · live from ~€12/mo', needsKey: true,
     signup: 'https://www.football-data.org/client/register', adapter: footballData,
     provides: ['Scores (12 competitions free)', 'Form', 'Head-to-head', 'League tables', 'Lineups (paid tiers)'],
     lacks: ['Shot stats', 'xG'], note: 'Free tier scores are delayed and limited to 10 requests/minute.',

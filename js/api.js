@@ -1,17 +1,40 @@
 // Data layer: ESPN's public soccer endpoints (no API key needed).
 // Every parser is defensive — missing fields degrade the analysis rather than break it.
 
-export const LEAGUES = [
-  ['eng.1', 'Premier League'], ['esp.1', 'LaLiga'], ['ita.1', 'Serie A'],
-  ['ger.1', 'Bundesliga'], ['fra.1', 'Ligue 1'], ['uefa.champions', 'Champions League'],
-  ['uefa.europa', 'Europa League'], ['uefa.europa.conf', 'Conference League'],
-  ['eng.2', 'Championship'], ['ned.1', 'Eredivisie'], ['por.1', 'Primeira Liga'],
-  ['sco.1', 'Scottish Premiership'], ['tur.1', 'Süper Lig'], ['bel.1', 'Belgian Pro League'],
-  ['usa.1', 'MLS'], ['mex.1', 'Liga MX'], ['bra.1', 'Brasileirão'], ['arg.1', 'Liga Profesional'],
-  ['sau.1', 'Saudi Pro League'], ['eng.fa', 'FA Cup'], ['esp.copa_del_rey', 'Copa del Rey'],
-  ['conmebol.libertadores', 'Copa Libertadores'], ['fifa.world', 'World Cup'],
-  ['uefa.euro', 'Euro'], ['fifa.friendly', 'Friendlies'],
+// Competitions scanned on ESPN. Names come from the feed when not given here.
+// Slugs ESPN doesn't recognise are skipped automatically (remembered for 24 hours).
+const NAMED = [
+  ['eng.1', 'Premier League'], ['esp.1', 'LaLiga'], ['ita.1', 'Serie A'], ['ger.1', 'Bundesliga'], ['fra.1', 'Ligue 1'],
+  ['uefa.champions', 'Champions League'], ['uefa.europa', 'Europa League'], ['uefa.europa.conf', 'Conference League'],
+  ['eng.2', 'Championship'], ['ned.1', 'Eredivisie'], ['por.1', 'Primeira Liga'], ['sco.1', 'Scottish Premiership'],
+  ['tur.1', 'Süper Lig'], ['bel.1', 'Belgian Pro League'], ['usa.1', 'MLS'], ['mex.1', 'Liga MX'], ['bra.1', 'Brasileirão'],
+  ['arg.1', 'Liga Profesional'], ['ksa.1', 'Saudi Pro League'], ['eng.fa', 'FA Cup'], ['esp.copa_del_rey', 'Copa del Rey'],
+  ['conmebol.libertadores', 'Copa Libertadores'], ['fifa.world', 'World Cup'], ['uefa.euro', 'Euro'], ['fifa.friendly', 'International Friendlies'],
 ];
+const MORE = [
+  // Europe
+  'eng.3', 'eng.4', 'eng.5', 'eng.league_cup', 'eng.trophy', 'eng.w.1', 'sco.2', 'sco.3', 'sco.4', 'sco.tennents', 'sco.cis',
+  'wal.1', 'nir.1', 'irl.1', 'irl.2', 'esp.2', 'esp.w.1', 'ger.2', 'ger.3', 'ger.dfb_pokal', 'ita.2', 'ita.coppa_italia',
+  'fra.2', 'fra.coupe_de_france', 'ned.2', 'ned.cup', 'por.2', 'gre.1', 'aut.1', 'sui.1', 'den.1', 'nor.1', 'swe.1', 'fin.1',
+  'isl.1', 'rus.1', 'ukr.1', 'pol.1', 'cze.1', 'svk.1', 'hun.1', 'rou.1', 'bul.1', 'srb.1', 'cro.1', 'svn.1', 'bih.1',
+  'cyp.1', 'isr.1', 'kaz.1', 'aze.1', 'geo.1', 'arm.1', 'alb.1', 'mkd.1', 'mne.1', 'lux.1', 'mlt.1', 'est.1', 'lva.1', 'ltu.1', 'blr.1', 'mda.1',
+  'uefa.super_cup', 'uefa.nations', 'uefa.euroq', 'uefa.champions_qual', 'uefa.europa_qual', 'uefa.europa.conf_qual', 'uefa.wchampions', 'uefa.youth_league',
+  // Americas
+  'usa.open', 'usa.usl.1', 'usa.usl.l1', 'usa.nwsl', 'can.1', 'mex.2', 'bra.2', 'bra.3', 'bra.copa_do_brazil', 'arg.2', 'arg.copa',
+  'chi.1', 'col.1', 'col.2', 'per.1', 'uru.1', 'par.1', 'ecu.1', 'bol.1', 'ven.1', 'crc.1', 'hon.1', 'gua.1', 'slv.1', 'pan.1', 'jam.1',
+  'conmebol.sudamericana', 'conmebol.recopa', 'conmebol.america', 'concacaf.champions', 'concacaf.gold', 'concacaf.nations.league',
+  'concacaf.leagues.cup', 'concacaf.central_american_cup',
+  // Asia & Oceania
+  'jpn.1', 'jpn.2', 'chn.1', 'kor.1', 'aus.1', 'aus.w.1', 'ind.1', 'uae.1', 'qat.1', 'irn.1', 'irq.1', 'jor.1', 'kuw.1', 'bhr.1', 'oma.1',
+  'tha.1', 'idn.1', 'mys.1', 'sgp.1', 'vie.1', 'phi.1', 'uzb.1', 'afc.champions', 'afc.cup', 'afc.asian.cup', 'sau.1',
+  // Africa
+  'rsa.1', 'egy.1', 'mar.1', 'tun.1', 'alg.1', 'nga.1', 'gha.1', 'ken.1', 'uga.1', 'tan.1', 'zam.1', 'zim.1',
+  'caf.champions', 'caf.confed', 'caf.nations', 'caf.nations_qual',
+  // World
+  'fifa.cwc', 'fifa.wwc', 'fifa.worldq.uefa', 'fifa.worldq.conmebol', 'fifa.worldq.concacaf', 'fifa.worldq.afc', 'fifa.worldq.caf',
+  'fifa.worldq.ofc', 'fifa.intercontinental_cup', 'fifa.olympics', 'fifa.u20.world', 'fifa.u17.world', 'club.friendly',
+];
+export const LEAGUES = [...NAMED, ...MORE.map((s) => [s, null])];
 const LEAGUE_NAME = Object.fromEntries(LEAGUES);
 const BASE = 'https://site.api.espn.com/apis';
 
@@ -28,7 +51,7 @@ export function proxied(url, proxy) {
 
 async function getJSON(url, proxy) {
   const res = await fetch(proxied(url, proxy), { cache: 'no-store' });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText}`), { status: res.status });
   return res.json();
 }
 
@@ -223,18 +246,45 @@ export async function cached(key, ttl, fn) {
   return v;
 }
 
-export async function fetchMatches({ proxy, leagues = LEAGUES.map((l) => l[0]), date } = {}) {
-  const q = date ? `?dates=${date}` : '';
+// Tiered scanning: every competition every 3 minutes, and every 30 seconds only those
+// with a live match or one kicking off soon.
+const FULL_SCAN_MS = 180_000;
+const BAD_KEY = 'gs:espn-bad';
+const byLeague = new Map();
+let lastFull = 0;
+let bad = {};
+try { bad = JSON.parse(localStorage.getItem(BAD_KEY) || '{}'); } catch { /* no storage */ }
+for (const [k, t] of Object.entries(bad)) if (Date.now() - t > 86_400_000) delete bad[k];
+
+export const scanStats = { leagues: 0, active: 0, skipped: 0, lastFull: 0 };
+
+export async function fetchMatches({ proxy, force = false } = {}) {
+  const now = Date.now();
+  const full = force || !byLeague.size || now - lastFull > FULL_SCAN_MS;
+  const slugs = LEAGUES.map((l) => l[0]).filter((s) => !bad[s]);
+  const busy = (s) => (byLeague.get(s) || []).some((m) => m.state === 'in' || (m.state === 'pre' && new Date(m.date) - now < 20 * 60_000));
+  const targets = full ? slugs : slugs.filter(busy);
   const results = await Promise.allSettled(
-    leagues.map((lg) =>
-      cached(`sb:${lg}:${date || ''}`, 25_000, () =>
-        getJSON(`${BASE}/site/v2/sports/soccer/${lg}/scoreboard${q}`, proxy).then((j) => parseScoreboard(j, lg))
-      )
-    )
+    targets.map((lg) => getJSON(`${BASE}/site/v2/sports/soccer/${lg}/scoreboard`, proxy).then((j) => parseScoreboard(j, lg)))
   );
-  const ok = results.filter((r) => r.status === 'fulfilled');
-  if (!ok.length) throw new Error(results[0]?.reason?.message || 'Network error');
-  return ok.flatMap((r) => r.value);
+  let ok = 0, lastErr = null;
+  results.forEach((r, i) => {
+    const lg = targets[i];
+    if (r.status === 'fulfilled') { byLeague.set(lg, r.value); ok++; }
+    else {
+      lastErr = r.reason;
+      if (r.reason?.status >= 400 && r.reason.status < 500) { bad[lg] = now; byLeague.delete(lg); }
+    }
+  });
+  try { localStorage.setItem(BAD_KEY, JSON.stringify(bad)); } catch { /* ignore */ }
+  if (targets.length && !ok && !byLeague.size) throw new Error(lastErr?.message || 'Network error');
+  if (full && ok) lastFull = now;
+  const all = [...byLeague.values()].flat();
+  Object.assign(scanStats, {
+    leagues: slugs.length,
+    active: new Set(all.map((m) => m.league)).size, skipped: Object.keys(bad).length, lastFull,
+  });
+  return all;
 }
 
 export async function fetchDetail(match, { proxy } = {}) {

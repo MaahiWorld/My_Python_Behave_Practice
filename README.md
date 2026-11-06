@@ -3,6 +3,18 @@
 An installable mobile web app (PWA) that scans football matches being played right now and estimates
 **whether another goal will come before the final whistle — and how many.**
 
+## What you see
+
+The **Live** tab lists every match being played right now, from any country the data sources
+cover, sorted by how likely a goal is in the **next 15 minutes**:
+
+> **Bodø/Glimt vs Molde · 62' · 2–2**
+> ⚡ Goal expected soon: 61% chance of a goal in the next 15 minutes; half the time the next goal
+> comes within ~12 minutes. 83% chance of another goal before full time.
+
+Matches at 50% or more for the next 15 minutes are pinned in a **Goal watch** group at the top.
+Open any match for the full reasoning.
+
 ## What it analyses
 
 For every match it builds a Poisson goal model from:
@@ -25,11 +37,20 @@ adjustment the model made.
 
 ## Data sources
 
-By default the app uses ESPN's public soccer feeds: free, no key, about 25 competitions
-(see `LEAGUES` in `js/api.js`).
+**ESPN (free, always on)** scans about 185 competitions worldwide: all major European leagues and
+their lower divisions, plus the Americas, Asia, Africa, Oceania and international tournaments (see
+`LEAGUES` in `js/api.js`). Every competition is scanned every 3 minutes; competitions with a live
+match are refreshed every 30 seconds. Any competition ESPN doesn't recognise is skipped
+automatically.
 
-Tap **⛁ Data sources** in the header to switch to another provider. Each one has an API key field,
-a **Test** button and a **Use this source** button, and the switch takes effect immediately:
+**API-Football (free key)** adds matches from its 1,000+ competitions that ESPN doesn't carry. The free
+100 requests a day are managed automatically: the match list costs 1 request and refreshes at most
+every 10 minutes (clocks are moved forward in between), an opened match's live stats refresh at most
+every 3 minutes, and the app stops 5 requests before the daily limit. Matches found by both sources
+are shown once.
+
+Tap **⛁ Data sources** in the header to add keys. Each source has a key field and a **Test** button;
+a working key joins the scan straight away, and a switch lets you leave a source out:
 
 | Source | Cost | Adds |
 | --- | --- | --- |

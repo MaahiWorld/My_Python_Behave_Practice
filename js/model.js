@@ -29,6 +29,13 @@ export function remainingShare(minute, state) {
   return Math.max(share, 0.025);
 }
 
+// Share of a full match's goal expectancy that falls between minute m and m + n.
+export function windowShare(minute, n) {
+  const m = clamp(minute || 0, 0, 120);
+  const after = m + n >= 90 ? 0 : remainingShare(m + n, 'in');
+  return Math.max(0, remainingShare(m, 'in') - after);
+}
+
 // Attack / defence multipliers (1.0 = league average) from table + form.
 export function teamStrength(team, leagueAvg = DEFAULT_LEAGUE_AVG) {
   const mu = leagueAvg || DEFAULT_LEAGUE_AVG;
@@ -276,6 +283,18 @@ export function predict(match, detail = {}) {
   const hs = match.home.score || 0;
   const as = match.away.score || 0;
   const remaining = rh + ra;
+
+  // Short-term outlook: goal intensity per unit of "match share", applied to the next windows.
+  let pNext15 = null, expectedNext15 = null, medianNextGoal = null;
+  if (live) {
+    const intensity = share > 0 ? remaining / share : 0;
+    expectedNext15 = intensity * windowShare(minute, 15);
+    pNext15 = 1 - Math.exp(-expectedNext15);
+    // Minutes until there is a 50% chance a goal has come (median wait), if within the match.
+    for (let n = 1; n <= Math.max(0, 95 - minute); n++) {
+      if (intensity * windowShare(minute, n) >= Math.LN2) { medianNextGoal = n; break; }
+    }
+  }
   const pMoreGoal = 1 - Math.exp(-remaining);
 
   // Distribution of further goals (Poisson sum of independent Poissons).
@@ -302,6 +321,7 @@ export function predict(match, detail = {}) {
   const mostLikelyMore = moreDist.indexOf(Math.max(...moreDist));
   let verdict;
   if (match.state === 'post') verdict = 'Full time';
+  else if (live && pNext15 >= 0.5) verdict = 'Goal expected soon';
   else if (pMoreGoal >= 0.75) verdict = 'Goal very likely';
   else if (pMoreGoal >= 0.55) verdict = 'Goal likely';
   else if (pMoreGoal >= 0.35) verdict = 'Could go either way';
@@ -310,6 +330,10 @@ export function predict(match, detail = {}) {
   return {
     verdict,
     pMoreGoal,
+    pNext15,
+    expectedNext15,
+    medianNextGoal,
+    soonLevel: pNext15 == null ? null : pNext15 >= 0.5 ? 'hot' : pNext15 >= 0.35 ? 'warm' : 'quiet',
     expectedMore: remaining,
     expectedMoreHome: rh,
     expectedMoreAway: ra,

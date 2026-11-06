@@ -58,36 +58,49 @@ const PHASE_TEXT = {
   PEN: () => 'The match has gone to a penalty shoot-out. Shoot-out penalties are not counted as match goals',
 };
 
-// Attack / defence multipliers (1.0 = league average) from table + form.
+// Attack / defence multipliers (1.0 = league average). Small samples are pulled toward average.
+export function seasonStrength(t, mu = DEFAULT_LEAGUE_AVG) {
+  if (!t || !(t.gp > 0)) return null;
+  const K = 4;
+  return {
+    att: clamp(((t.gf / t.gp / mu) * t.gp + K) / (t.gp + K), 0.35, 2.8),
+    def: clamp(((t.ga / t.gp / mu) * t.gp + K) / (t.gp + K), 0.35, 2.8),
+  };
+}
+export function formStrength(form, mu = DEFAULT_LEAGUE_AVG) {
+  const f = (form || []).slice(0, 5);
+  if (!f.length) return null;
+  const n = f.length, K = 2;
+  const gf = f.reduce((s, g) => s + g.gf, 0), ga = f.reduce((s, g) => s + g.ga, 0);
+  const pts = f.reduce((s, g) => s + (g.res === 'W' ? 3 : g.res === 'D' ? 1 : 0), 0);
+  return {
+    att: clamp(((gf / n / mu) * n + K) / (n + K), 0.35, 2.8),
+    def: clamp(((ga / n / mu) * n + K) / (n + K), 0.35, 2.8),
+    n, gf, ga, pts, results: f.map((g) => g.res).join(''),
+  };
+}
+// How far recent form moves a team away from its season level (35% weight when a season record
+// exists; recent form is all we have otherwise).
+const FORM_WEIGHT = 0.35;
+function formAdjust(season, form) {
+  if (!form) return { att: 1, def: 1 };
+  if (!season) return { att: form.att, def: form.def };
+  return {
+    att: clamp(1 + FORM_WEIGHT * (form.att / season.att - 1), 0.6, 1.6),
+    def: clamp(1 + FORM_WEIGHT * (form.def / season.def - 1), 0.6, 1.6),
+  };
+}
+// Combined attack / defence (season level adjusted by recent form), used for the ratings bars.
 export function teamStrength(team, leagueAvg = DEFAULT_LEAGUE_AVG) {
   const mu = leagueAvg || DEFAULT_LEAGUE_AVG;
-  const K = 4; // shrinkage toward average, in matches
-  const parts = [];
-  const t = team.table;
-  if (t && t.gp > 0) {
-    parts.push({
-      w: 0.7,
-      att: ((t.gf / t.gp / mu) * t.gp + K) / (t.gp + K),
-      def: ((t.ga / t.gp / mu) * t.gp + K) / (t.gp + K),
-    });
-  }
-  const f = team.form || [];
-  if (f.length > 0) {
-    const n = f.length;
-    const gf = f.reduce((s, g) => s + g.gf, 0);
-    const ga = f.reduce((s, g) => s + g.ga, 0);
-    parts.push({
-      w: 0.3,
-      att: ((gf / n / mu) * n + 2) / (n + 2),
-      def: ((ga / n / mu) * n + 2) / (n + 2),
-    });
-  }
-  if (!parts.length) return { att: 1, def: 1, source: 'none' };
-  const wSum = parts.reduce((s, p) => s + p.w, 0);
+  const season = seasonStrength(team.table, mu);
+  const form = formStrength(team.form, mu);
+  const adj = formAdjust(season, form);
+  if (!season && !form) return { att: 1, def: 1, source: 'none', season, form, adj };
   return {
-    att: clamp(parts.reduce((s, p) => s + p.att * p.w, 0) / wSum, 0.35, 2.8),
-    def: clamp(parts.reduce((s, p) => s + p.def * p.w, 0) / wSum, 0.35, 2.8),
-    source: parts.length === 2 ? 'table+form' : t && t.gp ? 'table' : 'form',
+    att: clamp((season?.att ?? 1) * adj.att, 0.35, 2.8),
+    def: clamp((season?.def ?? 1) * adj.def, 0.35, 2.8),
+    source: season && form ? 'table+form' : season ? 'table' : 'form', season, form, adj,
   };
 }
 
@@ -118,13 +131,26 @@ export function h2hSummary(h2h, homeId) {
   return s;
 }
 
-// Shots-on-target pace relative to a typical ~4.5 per team per 90.
-function pressureFactor(stats, minute) {
-  if (!stats || !Number.isFinite(stats.shotsOnTarget) || minute < 15) return 1;
-  const rate = stats.shotsOnTarget / minute;
-  const raw = clamp(rate / 0.05, 0.6, 1.6);
-  const w = clamp(minute / 90, 0, 1) * 0.5;
-  return 1 + (raw - 1) * w;
+// Current match stats: each team's attacking output so far compared with a typical team's pace.
+// Typical per team per 90 minutes: 12.5 shots, 4.3 on target, 5 corners, 50% possession.
+const TYPICAL = { shots: 12.5, shotsOnTarget: 4.3, corners: 5 };
+export function liveThreat(stats, minute, expectedSoFar) {
+  if (!stats || minute < 10) return null;
+  const mins = Math.max(10, minute);
+  const parts = [];
+  const xg = Number.isFinite(stats.xg);
+  if (xg && expectedSoFar > 0) parts.push({ k: 'xG', w: 0.5, r: stats.xg / expectedSoFar, txt: `${stats.xg.toFixed(2)} xG (about ${expectedSoFar.toFixed(2)} expected by now)` });
+  for (const [k, label, w, wx] of [['shotsOnTarget', 'shots on target', 0.45, 0.25], ['shots', 'shots', 0.25, 0.15], ['corners', 'corners', 0.15, 0.05]]) {
+    if (!Number.isFinite(stats[k])) continue;
+    const pace = (stats[k] / mins) * 90;
+    parts.push({ k, w: xg ? wx : w, r: pace / TYPICAL[k], txt: `${stats[k]} ${label} (on pace for ${pace.toFixed(1)} per 90; typical ${TYPICAL[k]})` });
+  }
+  if (Number.isFinite(stats.possession)) parts.push({ k: 'possession', w: xg ? 0.05 : 0.15, r: stats.possession / 50, txt: `${stats.possession}% possession` });
+  if (!parts.length) return null;
+  const wSum = parts.reduce((s, p) => s + p.w, 0);
+  const raw = parts.reduce((s, p) => s + clamp(p.r, 0.4, 2.2) * p.w, 0) / wSum;
+  const trust = clamp(minute / 90, 0, 1) * (xg ? 0.6 : 0.5); // trusted more as the match goes on
+  return { factor: clamp(1 + (raw - 1) * trust, 0.6, 1.6), raw, trust, parts, hasXg: xg };
 }
 
 const f2 = (v) => v.toFixed(2);
@@ -144,17 +170,17 @@ function formLine(form) {
 function confidence(match, detail, h2h) {
   const have = [], missing = [];
   const t = detail.table || {};
-  if (t.home?.gp >= 5 && t.away?.gp >= 5) have.push('season goal records for both teams');
-  else missing.push('season goal records (cup game or early season)');
+  if (t.home?.gp >= 5 && t.away?.gp >= 5) have.push('attacking and defensive records for both teams');
+  else missing.push('season attacking/defensive records (cup game or early season)');
   if (detail.form?.home?.length && detail.form?.away?.length) have.push('recent form for both teams');
   else missing.push('recent form');
   if (h2h.n >= 3) have.push(`${h2h.n} head-to-head meetings`);
   else missing.push('enough head-to-head history');
   if (match.state === 'in') {
     const ls = detail.liveStats?.home;
-    if (ls && Number.isFinite(ls.xg)) have.push('live xG');
-    else if (ls && Number.isFinite(ls.shotsOnTarget)) have.push('live shot data');
-    else missing.push('live shot data');
+    if (ls && Number.isFinite(ls.xg)) have.push('current match stats with xG');
+    else if (ls && (Number.isFinite(ls.shotsOnTarget) || Number.isFinite(ls.shots))) have.push('current match stats');
+    else missing.push('current match stats');
   }
   const score = have.length / (have.length + missing.length);
   return { level: score >= 0.75 ? 'High' : score >= 0.45 ? 'Medium' : 'Low', have, missing };
@@ -188,25 +214,57 @@ export function predict(match, detail = {}) {
       `Home sides score about 10% more and away sides about 10% less, so we start from ${f2(rh)} for ${H} and ${f2(ra)} for ${A}: ${f2(rh + ra)} goals in a full match.`,
   });
 
-  // 2. Attack vs defence.
-  step({
-    key: 'strength', title: 'Attacking power vs defensive strength',
-    short: (() => {
-      const best = [[sh.att, `${H} score`], [sa.att, `${A} score`], [sh.def, `${H} concede`], [sa.def, `${A} concede`]]
-        .sort((x, y) => Math.abs(y[0] - 1) - Math.abs(x[0] - 1))[0];
-      return `${best[1]} ${vsAvg(best[0]).replace('league average', 'avg')}`;
-    })(),
-    detail: `${H} score at a rate ${vsAvg(sh.att)} and concede at a rate ${vsAvg(sh.def)}. ` +
-      `${A} score at a rate ${vsAvg(sa.att)} and concede at a rate ${vsAvg(sa.def)}. ` +
-      `Each side's expected goals = its attack × the opponent's defence, giving ${f2(rh * sh.att * sa.def)} for ${H} and ${f2(ra * sa.att * sh.def)} for ${A}.`,
-    evidence: [
-      perGame(home.table, 'gf') && `${H} season: ${perGame(home.table, 'gf')} scored, ${perGame(home.table, 'ga')} conceded per game over ${home.table.gp} games`,
-      formLine(home.form) && `${H} ${formLine(home.form)}`,
-      perGame(away.table, 'gf') && `${A} season: ${perGame(away.table, 'gf')} scored, ${perGame(away.table, 'ga')} conceded per game over ${away.table.gp} games`,
-      formLine(away.form) && `${A} ${formLine(away.form)}`,
-      'Season record weighted 70%, last 5 games 30%; small samples are pulled toward average so one big result can\'t dominate.',
-    ].filter(Boolean),
-  }, () => { rh *= sh.att * sa.def; ra *= sa.att * sh.def; });
+  // 2. Attacking power vs defensive strength (season record).
+  const ssH = sh.season, ssA = sa.season;
+  if (ssH || ssA) {
+    const hA = ssH?.att ?? 1, hD = ssH?.def ?? 1, aA = ssA?.att ?? 1, aD = ssA?.def ?? 1;
+    step({
+      key: 'strength', title: 'Attacking power vs defensive strength',
+      short: (() => {
+        const best = [[hA, `${H} score`], [aA, `${A} score`], [hD, `${H} concede`], [aD, `${A} concede`]]
+          .sort((x, y) => Math.abs(y[0] - 1) - Math.abs(x[0] - 1))[0];
+        return `${best[1]} ${vsAvg(best[0]).replace('league average', 'avg')}`;
+      })(),
+      detail: `Over the season, ${H} ${ssH ? `score at a rate ${vsAvg(hA)} and concede at a rate ${vsAvg(hD)}` : 'have no season record here (treated as average)'}; ` +
+        `${A} ${ssA ? `score at a rate ${vsAvg(aA)} and concede at a rate ${vsAvg(aD)}` : 'have no season record here (treated as average)'}. ` +
+        `Each side's goals come from its attacking power against the other's defence: ${H}'s attack × ${A}'s defence gives ${f2(rh * hA * aD)}, ` +
+        `${A}'s attack × ${H}'s defence gives ${f2(ra * aA * hD)}.`,
+      evidence: [
+        perGame(home.table, 'gf') && `${H}: ${perGame(home.table, 'gf')} scored, ${perGame(home.table, 'ga')} conceded per game over ${home.table.gp} games`,
+        perGame(away.table, 'gf') && `${A}: ${perGame(away.table, 'gf')} scored, ${perGame(away.table, 'ga')} conceded per game over ${away.table.gp} games`,
+        'Small samples are pulled toward average so a few big results can\'t dominate.',
+      ].filter(Boolean),
+    }, () => { rh *= hA * aD; ra *= aA * hD; });
+  } else {
+    reasons.push({ key: 'strength', title: 'Attacking power vs defensive strength', delta: 0, impact: 'neutral', short: 'no season record',
+      detail: 'No season goal record is available for these teams (a cup tie or very early in the season), so attacking and defensive power are judged from recent form below.' });
+  }
+
+  // 3. Recent form (last 5 matches).
+  const fH = sh.form, fA = sa.form;
+  if (fH || fA) {
+    const jH = sh.adj, jA = sa.adj;
+    const desc = (name, f, season) => {
+      if (!f) return `${name}: no recent results available`;
+      const pace = f.gf / f.n, conc = f.ga / f.n;
+      const vs = season ? ` against a season rate of ${f2(season.att * mu)} scored and ${f2(season.def * mu)} conceded` : '';
+      return `${name} ${f.results} in the last ${f.n}: ${f.gf} scored (${pace.toFixed(1)} a game) and ${f.ga} conceded (${conc.toFixed(1)} a game)${vs}`;
+    };
+    const hot = [[jH.att, `${H} scoring more lately`, `${H} scoring less lately`], [jA.att, `${A} scoring more lately`, `${A} scoring less lately`],
+      [jH.def, `${H} leaking more goals lately`, `${H} tighter at the back lately`], [jA.def, `${A} leaking more goals lately`, `${A} tighter at the back lately`]]
+      .sort((x, y) => Math.abs(y[0] - 1) - Math.abs(x[0] - 1))[0];
+    step({
+      key: 'form', title: 'Recent form',
+      short: Math.abs(hot[0] - 1) < 0.03 ? 'form in line with season' : hot[0] > 1 ? hot[1] : hot[2],
+      detail: `${desc(H, fH, ssH)}. ${desc(A, fA, ssA)}. ` +
+        (ssH || ssA ? `Recent form counts for ${Math.round(FORM_WEIGHT * 100)}% against the season level, so a hot or cold run shifts the picture without overriding it.`
+          : 'With no season record, recent form sets attacking and defensive power on its own.'),
+      evidence: [fH && `${H} form points: ${fH.pts}/${fH.n * 3}`, fA && `${A} form points: ${fA.pts}/${fA.n * 3}`].filter(Boolean),
+    }, () => { rh *= jH.att * jA.def; ra *= jA.att * jH.def; });
+  } else {
+    reasons.push({ key: 'form', title: 'Recent form', delta: 0, impact: 'neutral', short: 'no recent results',
+      detail: 'No recent results are available for these teams, so form makes no adjustment.' });
+  }
 
   // 3. Head to head.
   const h2h = h2hSummary(detail.h2h, match.home.id);
@@ -270,35 +328,24 @@ export function predict(match, detail = {}) {
       });
     }
 
-    // 7. Live chance quality: expected goals (xG) when the source has it, otherwise shots on target.
-    const lh = detail.liveStats?.home, la = detail.liveStats?.away;
-    if (Number.isFinite(lh?.xg) && Number.isFinite(la?.xg) && minute >= 10) {
-      const w = clamp(minute / 90, 0, 1) * 0.6;
-      const played = ['ET', 'BREAK_ET', 'PEN'].includes(phase) ? 1 + Math.max(0, minute - 90) / 90 : 1 - share;
-      const soFarH = fullHome * played, soFarA = fullAway * played;
-      const xf = (xg, exp) => 1 + (clamp(exp > 0 ? xg / exp : 1, 0.5, 2) - 1) * w;
-      const xh = xf(lh.xg, soFarH), xa = xf(la.xg, soFarA);
+    // 7. Current match stats.
+    const played = ['ET', 'BREAK_ET', 'PEN'].includes(phase) ? 1 + Math.max(0, minute - 90) / 90 : 1 - share;
+    const th = liveThreat(detail.liveStats?.home, minute, fullHome * played);
+    const ta = liveThreat(detail.liveStats?.away, minute, fullAway * played);
+    if ((th || ta) && phase !== 'PEN') {
+      const fh = th?.factor ?? 1, fa = ta?.factor ?? 1;
+      const word = (t) => (!t ? 'no stats' : t.raw >= 1.15 ? 'well above a typical pace' : t.raw >= 1.03 ? 'slightly above a typical pace' : t.raw > 0.97 ? 'at a typical pace' : t.raw > 0.85 ? 'slightly below a typical pace' : 'well below a typical pace');
       step({
-        key: 'xg', title: 'Live chance quality (xG)',
-        short: xh * xa >= 1 ? 'creating better chances than expected' : 'chances below expected so far',
-        detail: `Expected goals (xG) rates every chance by how often similar chances are scored, so it shows how dangerous a team has really been. ` +
-          `So far ${H} have ${f2(lh.xg)} xG (the model expected about ${f2(soFarH)} by now) and ${A} have ${f2(la.xg)} xG (expected ${f2(soFarA)}). ` +
-          `Teams creating more than expected tend to keep doing so; this is trusted more as the match goes on: ${H} ×${f2(xh)}, ${A} ×${f2(xa)}.`,
-        evidence: [lh.shotsOnTarget != null && `Shots on target ${lh.shotsOnTarget}–${la.shotsOnTarget ?? 0}`, lh.possession != null && `Possession ${lh.possession}%–${la.possession ?? 0}%`].filter(Boolean),
-      }, () => { rh *= xh; ra *= xa; });
-    } else {
-      const ph = pressureFactor(lh, minute);
-      const pa = pressureFactor(la, minute);
-      if (ph !== 1 || pa !== 1) {
-        const pace = (s) => (s.shotsOnTarget / minute * 90).toFixed(1);
-        step({
-          key: 'pressure', title: 'Live attacking pressure',
-          short: ph * pa >= 1 ? 'shots on target above normal pace' : 'few shots on target so far',
-          detail: `Shots on target are the best live sign of chances being created. ${H} have ${lh.shotsOnTarget} (on pace for ${pace(lh)} per 90) and ${A} have ${la?.shotsOnTarget ?? 0} (${la ? pace(la) : '0.0'} per 90); a typical side manages about 4.5. ` +
-            `The further into the match, the more this is trusted: ${H} ×${f2(ph)}, ${A} ×${f2(pa)}.`,
-          evidence: [lh?.shots != null && `Total shots ${lh.shots}–${la?.shots ?? 0}`, lh?.possession != null && `Possession ${lh.possession}%–${la?.possession ?? 0}%`].filter(Boolean),
-        }, () => { rh *= ph; ra *= pa; });
-      }
+        key: 'live', title: 'Current match stats',
+        short: fh * fa >= 1.03 ? (fh >= fa ? `${H} creating plenty` : `${A} creating plenty`) : fh * fa <= 0.97 ? 'few chances created so far' : 'chances at a normal rate',
+        detail: `What has happened in this match so far: ${H} are attacking ${word(th)} and ${A} ${word(ta)}. ` +
+          `${th?.hasXg || ta?.hasXg ? 'Expected goals (xG) rates every chance by how often similar chances are scored, so it carries the most weight, with shots, corners and possession adding detail. ' : 'Shots on target carry the most weight, then total shots, corners and possession. '}` +
+          `These stats are trusted more as the match goes on (${Math.round((th?.trust ?? ta?.trust ?? 0) * 100)}% weight at ${minute}'): ${H}'s scoring rate ×${f2(fh)}, ${A}'s ×${f2(fa)}.`,
+        evidence: [...(th?.parts || []).map((p) => `${H}: ${p.txt}`), ...(ta?.parts || []).map((p) => `${A}: ${p.txt}`)],
+      }, () => { rh *= fh; ra *= fa; });
+    } else if (phase !== 'PEN') {
+      reasons.push({ key: 'live', title: 'Current match stats', delta: 0, impact: 'neutral', short: minute < 10 ? 'too early for match stats' : 'no match stats',
+        detail: minute < 10 ? 'Fewer than 10 minutes played, too early for match stats to say anything reliable.' : 'This data source has no live match statistics for this game, so no adjustment.' });
     }
   }
   if (match.state === 'post') { rh = 0; ra = 0; }

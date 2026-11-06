@@ -56,10 +56,10 @@ test('API-Football fixture + detail parse, with xG flowing into the reasoning', 
 
   const p = predict(m, d);
   const keys = p.reasons.map((r) => r.key);
-  assert.ok(keys.includes('xg'), 'xG step used');
-  assert.ok(!keys.includes('pressure'), 'xG replaces the shots-on-target step');
+  const liveStep = p.reasons.find((r) => r.key === 'live');
+  assert.ok(liveStep && /xG/.test(liveStep.detail) && liveStep.evidence.some((e) => e.includes('xG')), 'xG used in match stats');
   assert.ok(keys.includes('red'), 'red card from events');
-  assert.ok(p.confidence.have.includes('live xG'));
+  assert.ok(p.confidence.have.includes('current match stats with xG'));
 });
 
 test('Sportmonks fixture + detail parse', () => {

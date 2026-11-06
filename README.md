@@ -22,23 +22,17 @@ Open any match for the full reasoning.
 
 ## What it analyses
 
-For every match it builds a Poisson goal model from:
+Every prediction is built from four groups of inputs, each shown as its own step with its effect on
+the goals expected for the rest of the match:
 
-| Factor | Source |
+| Input | What it uses |
 | --- | --- |
-| **Attacking power** | Goals scored per game in the league table, blended with the last 5 results |
-| **Defensive strength** | Goals conceded per game (table + last 5) |
-| **Recent form** | W/D/L and goals in the last 5 matches |
-| **Head to head** | Past meetings — average goals nudge the expectancy up or down |
-| **Players on the pitch** | Live lineups, including substitutions and goalscorers |
-| **Live state** | Minute played, scoreline (trailing side pushes), red cards, shots-on-target pressure |
+| **Attacking power vs defensive strength** | Each team's goals scored and conceded per game this season, against the league average; one side's attack is set against the other's defence |
+| **Recent form** | Goals scored and conceded and W/D/L in the last 5 matches; counts 35% against the season level, or fully when there is no season record (cups) |
+| **Current match stats** | Shots on target, total shots, corners and possession so far (plus xG when a source has it) compared with a typical team's pace; trusted more as the match goes on |
+| **Match situation** | Minute and stage of the match, scoreline (a trailing team pushes forward), red cards, and head-to-head history |
 
-It then shows the chance of at least one more goal, expected remaining goals, a distribution of
-0 / 1 / 2 / 3 / 4 / 5+ more goals, the likeliest final scores, win/draw/loss odds, Over 2.5 and
-both-teams-to-score, plus a "Stats runner" comparing the two sides and a plain-English list of every
-adjustment the model made.
-
-> Statistical estimates for fun and learning — not betting advice.
+Each match card shows how these moved the prediction, e.g. `Attack/defence ▲ +0.3 · Form ▼ −0.2 · Match stats ▲ +0.1`.
 
 ## Data sources
 

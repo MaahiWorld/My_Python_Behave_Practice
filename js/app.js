@@ -183,11 +183,21 @@ function cardChance(m) {
   </div>`;
 }
 
+// One line per card: how each factor moved the goals expected for the rest of the match.
+const DRIVERS = [['strength', 'Attack/defence'], ['form', 'Form'], ['live', 'Match stats'], ['score', 'Scoreline'], ['red', 'Red card'], ['h2h', 'H2H']];
 function whyLine(m) {
   const hit = state.details.get(keyOf(m));
   if (!hit || m.state === 'post') return '';
   const p = predict(m, hit.detail);
-  return p.summary.length ? `<div class="why">Why: ${esc(p.summary.join(' · '))}</div>` : '';
+  const chips = DRIVERS.map(([k, label]) => {
+    const r = p.reasons.find((x) => x.key === k);
+    if (!r || (['score', 'red', 'h2h'].includes(k) && r.impact === 'neutral')) return '';
+    const arrow = r.impact === 'up' ? '▲' : r.impact === 'down' ? '▼' : '•';
+    const d = Math.abs(r.delta);
+    const val = r.impact === 'neutral' ? '' : ` ${r.delta > 0 ? '+' : '−'}${d < 0.1 ? d.toFixed(2) : d.toFixed(1)}`;
+    return `<span class="drv ${r.impact}" title="${esc(r.short)}">${label} ${arrow}${val}</span>`;
+  }).join('');
+  return `<div class="why"><div class="drivers">${chips}</div>${p.summary.length ? `<div>${esc(p.summary.join(' · '))}</div>` : ''}</div>`;
 }
 
 function matchCard(m, showLeague = false) {

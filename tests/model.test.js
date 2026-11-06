@@ -138,7 +138,7 @@ test('every prediction carries a reasoning ledger that adds up', () => {
   };
   const p = predict(m, d);
   const keys = p.reasons.map((r) => r.key);
-  for (const k of ['baseline', 'strength', 'h2h', 'time', 'score', 'red', 'pressure']) assert.ok(keys.includes(k), k);
+  for (const k of ['baseline', 'strength', 'form', 'h2h', 'time', 'score', 'red', 'live']) assert.ok(keys.includes(k), k);
   const total = p.reasons.reduce((s, r) => s + r.delta, 0);
   assert.ok(Math.abs(total - p.expectedMore) < 1e-9, 'step deltas sum to expected remaining goals');
   for (const r of p.reasons) assert.ok(r.detail.length > 20 && !r.detail.includes('undefined') && !r.detail.includes('NaN'), r.key);
@@ -184,4 +184,40 @@ test('ESPN phase parsing', () => {
   assert.equal(parsePhase({ period: 3, type: { name: 'STATUS_FIRST_HALF_EXTRA_TIME' } }), 'ET');
   assert.equal(parsePhase({ period: 5, type: { name: 'STATUS_SHOOTOUT' } }), 'PEN');
   assert.equal(parseMinute({ period: 1, displayClock: "45'+2'" }), 47);
+});
+
+test('each input moves the goal scope the right way: attack/defence, recent form, current match stats', () => {
+  const t = (id, score = 0) => ({ id, name: id, short: id, abbr: id, score });
+  const m = { id: '1', state: 'in', minute: 55, phase: 'H2', home: t('h'), away: t('a') };
+  const avgTable = { home: { gp: 12, gf: 16, ga: 16 }, away: { gp: 12, gf: 16, ga: 16 } };
+  const games = (gf, ga, res) => Array.from({ length: 5 }, () => ({ gf, ga, res }));
+  const base = predict(m, { table: avgTable }).expectedMore;
+
+  // Attacking and defending power.
+  const attacking = predict(m, { table: { home: { gp: 12, gf: 30, ga: 10 }, away: { gp: 12, gf: 20, ga: 26 } } }).expectedMore;
+  const defensive = predict(m, { table: { home: { gp: 12, gf: 9, ga: 7 }, away: { gp: 12, gf: 8, ga: 8 } } }).expectedMore;
+  assert.ok(attacking > base * 1.2 && defensive < base * 0.8, `${attacking} / ${base} / ${defensive}`);
+
+  // Recent form on top of the season level.
+  const hot = predict(m, { table: avgTable, form: { home: games(3, 2, 'W'), away: games(2, 3, 'L') } });
+  const cold = predict(m, { table: avgTable, form: { home: games(0, 0, 'D'), away: games(0, 1, 'L') } });
+  assert.ok(hot.expectedMore > base && cold.expectedMore < base);
+  assert.equal(hot.reasons.find((r) => r.key === 'form').impact, 'up');
+  assert.equal(cold.reasons.find((r) => r.key === 'form').impact, 'down');
+  // Form alone sets the level when there is no season record.
+  assert.ok(predict(m, { form: { home: games(3, 2, 'W'), away: games(2, 3, 'L') } }).expectedMore > predict(m, {}).expectedMore);
+
+  // Current match stats.
+  const busy = { shotsOnTarget: 7, shots: 15, corners: 7, possession: 55 };
+  const quiet = { shotsOnTarget: 0, shots: 2, corners: 0, possession: 45 };
+  const open = predict(m, { table: avgTable, liveStats: { home: busy, away: busy } });
+  const flat = predict(m, { table: avgTable, liveStats: { home: quiet, away: quiet } });
+  assert.ok(open.expectedMore > base && flat.expectedMore < base);
+  const live = open.reasons.find((r) => r.key === 'live');
+  assert.ok(['shots on target', 'shots', 'corners', 'possession'].every((k) => live.evidence.some((e) => e.includes(k))), 'all match stats used');
+  // Match stats count for more late in the game than early on.
+  const early = predict({ ...m, minute: 20, phase: 'H1' }, { table: avgTable, liveStats: { home: { ...busy, shotsOnTarget: 3, shots: 6, corners: 3 }, away: quiet } });
+  const late = predict({ ...m, minute: 75 }, { table: avgTable, liveStats: { home: { ...busy, shotsOnTarget: 11, shots: 23, corners: 10 }, away: quiet } });
+  const trust = (p) => p.reasons.find((r) => r.key === 'live').detail.match(/(\d+)% weight/)[1];
+  assert.ok(+trust(late) > +trust(early));
 });

@@ -6,17 +6,18 @@ An installable mobile web app (PWA) that scans football matches being played rig
 ## What you see
 
 The **Live** tab lists every match being played right now, from any country the data sources
-cover, sorted by how likely a goal is in the **next 15 minutes**:
+cover, sorted by how many more goals are expected from the current minute to the end of the match:
 
 > **Bodø/Glimt vs Molde · 62' · 2–2**
-> ⚡ Goal expected soon: 61% chance of a goal in the next 15 minutes; half the time the next goal
-> comes within ~12 minutes. 83% chance of another goal before full time.
+> About **1.9 more goals** expected before full time. **85%** chance of at least one more goal;
+> most likely 1 more. 0 more 15% · 1 more 29% · 2 more 27% · 3 more 17% · 4+ more 12%
 
 This works at every point of a match: from kick-off, through first-half added time (shown as 45+2'),
-half time (the next 15 minutes means the first 15 of the second half), late added time (90+3'),
+half time (counting the whole second half), late added time (90+3'),
 the break before extra time, extra time, and penalty shoot-outs (which don't count as match goals).
 
-Matches at 50% or more for the next 15 minutes are pinned in a **Goal watch** group at the top.
+Matches where at least one more goal is 75% likely or better are pinned in a **High goal scope** group at
+the top.
 Open any match for the full reasoning.
 
 ## What it analyses

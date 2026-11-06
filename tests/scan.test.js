@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeMatches, sameTeam, sameMatch, extrapolate, normName } from '../js/merge.js';
-import { predict, windowShare } from '../js/model.js';
+import { predict } from '../js/model.js';
 import { fetchMatches, scanStats, LEAGUES } from '../js/api.js';
 import { SOURCES, afQuota } from '../js/sources.js';
 
@@ -37,16 +37,14 @@ test('clock is moved forward between infrequent list updates, capped at half tim
   assert.equal(extrapolate({ ...m, detail: 'HT' }).minute, 30);
 });
 
-test('next-15-minute outlook is consistent with the rest-of-match chance', () => {
-  assert.ok(Math.abs(windowShare(0, 200, 'H1') - 1) < 1e-9, 'the whole match, added time included, holds all of it');
-  assert.ok(windowShare(60, 15) > windowShare(10, 15), 'second-half minutes carry more goals');
+test('goal scope from the current minute to the end', () => {
   const p = predict(M({ minute: 50 }));
-  assert.ok(p.pNext15 > 0.3 && p.pNext15 < p.pMoreGoal);
-  assert.ok(p.medianNextGoal > 10 && p.medianNextGoal < 30);
-  assert.equal(predict(M({ state: 'pre', minute: 0 })).pNext15, null);
+  assert.ok(p.expectedMore > 0.9 && p.expectedMore < 1.6, String(p.expectedMore));
+  assert.equal(p.mostLikelyMore, 1);
+  assert.equal(p.scopeLevel, 'medium');
   const strong = predict(M({ minute: 50 }), { table: { home: { gp: 10, gf: 30, ga: 20 }, away: { gp: 10, gf: 25, ga: 28 } } });
-  assert.equal(strong.soonLevel, 'hot');
-  assert.equal(strong.verdict, 'Goal expected soon');
+  assert.equal(strong.scopeLevel, 'high');
+  assert.ok(strong.expectedMore > p.expectedMore);
 });
 
 test('ESPN scan covers ~185 competitions, skips unknown ones and re-polls only busy leagues', async () => {

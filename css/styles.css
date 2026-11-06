@@ -281,21 +281,24 @@ a.icon-btn { display: grid; place-items: center; }
 
 /* Goal-soon signals */
 .match.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset, var(--shadow); }
-.chance.hot .pct { color: var(--accent-ink); }
-.chance.quiet .pct { color: var(--muted); }
+.chance.high .pct { color: var(--accent-ink); }
+.chance.low .pct { color: var(--muted); }
 .chance .lbl2 { font-size: 10.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
-.chance.hot .mini-bar > i { background: var(--accent); }
-.chance.warm .mini-bar > i { background: var(--warn); }
-.chance.quiet .mini-bar > i { background: var(--muted); }
+.chance.high .mini-bar > i { background: var(--accent); }
+.chance.medium .mini-bar > i { background: var(--warn); }
+.chance.low .mini-bar > i { background: var(--muted); }
 .soon { grid-column: 1 / -1; font-size: 13px; font-weight: 700; color: var(--accent-ink); }
 .lg-line { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .league-head.watch { color: var(--accent-ink); }
 .chips.sort { margin-bottom: 0; }
 .headline { border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; background: var(--surface-2); border-left: 4px solid var(--muted); }
-.headline.hot { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
-.headline.warm { border-left-color: var(--warn); }
+.headline.high { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+.headline.medium { border-left-color: var(--warn); }
 .hl-match { font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
 .hl-text { font-size: 15px; }
 .quota { margin: 0 0 6px; }
 .scan-toggle { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-weight: 600; font-size: 14px; }
 .scan-toggle input { width: 18px; height: 18px; }
+.hl-dist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hl-dist span { font-size: 12.5px; background: var(--surface); border-radius: 8px; padding: 3px 8px; color: var(--muted); }
+.hl-dist b { color: var(--text); }

@@ -48,19 +48,6 @@ export function remainingShare(minute, state, phase) {
   }
 }
 
-// Share of a full match's goal expectancy in the next n minutes of play.
-export function windowShare(minute, n, phase) {
-  const m = clamp(minute || 0, 0, 130);
-  switch (phase || (m <= 45 ? 'H1' : m <= 100 ? 'H2' : 'ET')) {
-    case 'H1': return m + n <= H1_END ? rem1(m) - rem1(m + n) : rem1(m) - 0.55 + (0.55 - rem2(45 + (m + n - H1_END)));
-    case 'HT': return 0.55 - rem2(45 + n);
-    case 'H2': return m + n >= H2_END ? remainingShare(m, 'in', 'H2') : rem2(m) - rem2(m + n);
-    case 'BREAK_ET': return remET(90) - remET(90 + n);
-    case 'ET': return m + n >= ET_END ? remainingShare(m, 'in', 'ET') : remET(m) - remET(m + n);
-    default: return 0;
-  }
-}
-
 const PHASE_TEXT = {
   H1: (m) => `${m} minutes played in the first half. The rest of this half and the whole second half are still to come`,
   HT: () => 'Half time. The whole second half is still to come, and it usually produces more goals than the first',
@@ -321,17 +308,6 @@ export function predict(match, detail = {}) {
   const as = match.away.score || 0;
   const remaining = rh + ra;
 
-  // Short-term outlook: goal intensity per unit of "match share", applied to the next windows.
-  let pNext15 = null, expectedNext15 = null, medianNextGoal = null;
-  if (live) {
-    const intensity = share > 0 ? remaining / share : 0;
-    expectedNext15 = intensity * windowShare(minute, 15, phase);
-    pNext15 = 1 - Math.exp(-expectedNext15);
-    // Minutes until there is a 50% chance a goal has come (median wait), if within the match.
-    for (let n = 1; n <= 80; n++) {
-      if (intensity * windowShare(minute, n, phase) >= Math.LN2) { medianNextGoal = n; break; }
-    }
-  }
   const pMoreGoal = 1 - Math.exp(-remaining);
 
   // Distribution of further goals (Poisson sum of independent Poissons).
@@ -359,7 +335,6 @@ export function predict(match, detail = {}) {
   let verdict;
   if (match.state === 'post') verdict = 'Full time';
   else if (phase === 'PEN') verdict = 'Penalty shoot-out';
-  else if (live && pNext15 >= 0.5) verdict = 'Goal expected soon';
   else if (pMoreGoal >= 0.75) verdict = 'Goal very likely';
   else if (pMoreGoal >= 0.55) verdict = 'Goal likely';
   else if (pMoreGoal >= 0.35) verdict = 'Could go either way';
@@ -368,11 +343,9 @@ export function predict(match, detail = {}) {
   return {
     verdict,
     pMoreGoal,
-    pNext15,
     phase,
-    expectedNext15,
-    medianNextGoal,
-    soonLevel: pNext15 == null ? null : pNext15 >= 0.5 ? 'hot' : pNext15 >= 0.35 ? 'warm' : 'quiet',
+    // How much goal scope is left from this point to the end: high / medium / low.
+    scopeLevel: match.state === 'post' || phase === 'PEN' ? 'low' : pMoreGoal >= 0.75 ? 'high' : pMoreGoal >= 0.5 ? 'medium' : 'low',
     expectedMore: remaining,
     expectedMoreHome: rh,
     expectedMoreAway: ra,

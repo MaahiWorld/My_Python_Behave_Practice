@@ -141,9 +141,9 @@ function statusLabel(m) {
 }
 const reds = (n) => '<span class="red-card" title="Red card"></span>'.repeat(n || 0);
 const predFor = (m) => predict(m, state.details.get(keyOf(m))?.detail);
-// What "the next 15 minutes" means at this point of the match.
-const windowLabel = (ph) => ({ HT: 'first 15 minutes of the second half', BREAK_ET: 'first 15 minutes of extra time' }[ph] || 'next 15 minutes');
-const windowShort = (ph) => ({ HT: "goal in 15' after HT", BREAK_ET: "goal in first 15' of ET" }[ph] || "goal in next 15'");
+// "Until the end" in words, for the current stage of the match.
+const untilEnd = (ph) => ({ HT: 'in the second half', BREAK_ET: 'in extra time', ET: 'before the end of extra time' }[ph] || 'before full time');
+const moreGoals = (n) => `${n.toFixed(1)} more goal${n.toFixed(1) === '1.0' ? '' : 's'}`;
 
 // ---- List view ----
 function counts() {
@@ -155,7 +155,7 @@ function filtered() {
   const want = { live: 'in', upcoming: 'pre', finished: 'post' }[state.tab];
   const list = state.matches.filter((m) => m.state === want && (state.league === 'all' || m.league === state.league));
   if (state.tab === 'live' && state.sort === 'chance') {
-    const score = new Map(list.map((m) => [m, predFor(m).pNext15 ?? 0]));
+    const score = new Map(list.map((m) => [m, predFor(m).expectedMore]));
     return list.sort((a, b) => score.get(b) - score.get(a));
   }
   if (state.tab === 'upcoming') return list.sort((a, b) => new Date(a.date) - new Date(b.date) || a.leagueName.localeCompare(b.leagueName));
@@ -166,19 +166,20 @@ function cardChance(m) {
   const hit = state.details.get(keyOf(m));
   const p = predFor(m);
   if (m.state === 'post') return `<div class="chance"><div class="lbl">${m.home.score + m.away.score} goals</div></div>`;
-  if (m.state === 'in' && p.phase === 'PEN') return '<div class="chance quiet"><div class="lbl">Penalty<br>shoot-out</div></div>';
+  if (m.state === 'in' && p.phase === 'PEN') return '<div class="chance low"><div class="lbl">Penalty<br>shoot-out</div></div>';
   if (m.state === 'in') {
-    return `<div class="chance ${p.soonLevel}">
-      <div class="pct">${pct(p.pNext15)}</div>
-      <div class="lbl">${windowShort(p.phase)}${hit ? '' : ' ~'}</div>
-      <div class="mini-bar"><i style="width:${pct(p.pNext15)}"></i></div>
-      <div class="lbl2">rest of match ${pct(p.pMoreGoal)}</div>
+    return `<div class="chance ${p.scopeLevel}">
+      <div class="pct">${p.expectedMore.toFixed(1)}</div>
+      <div class="lbl">more goals expected${hit ? '' : ' ~'}</div>
+      <div class="mini-bar"><i style="width:${pct(p.pMoreGoal)}"></i></div>
+      <div class="lbl2">${pct(p.pMoreGoal)} chance of 1+ more</div>
     </div>`;
   }
   return `<div class="chance">
-    <div class="pct">${pct(p.pMoreGoal)}</div>
-    <div class="lbl">any goal${hit ? '' : ' ~'}</div>
+    <div class="pct">${p.expectedMore.toFixed(1)}</div>
+    <div class="lbl">goals expected${hit ? '' : ' ~'}</div>
     <div class="mini-bar"><i style="width:${pct(p.pMoreGoal)}"></i></div>
+    <div class="lbl2">${pct(p.pMoreGoal)} chance of a goal</div>
   </div>`;
 }
 
@@ -191,7 +192,7 @@ function whyLine(m) {
 
 function matchCard(m, showLeague = false) {
   const p = m.state === 'in' ? predFor(m) : null;
-  const hot = p?.soonLevel === 'hot' && state.details.has(keyOf(m));
+  const hot = p?.scopeLevel === 'high' && state.details.has(keyOf(m));
   return `<a class="card match${hot ? ' hot' : ''}" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}" data-key="${esc(keyOf(m))}" data-showleague="${showLeague ? 1 : ''}">
     <div class="status ${m.state === 'in' ? 'live' : ''}">${esc(statusLabel(m))}</div>
     <div class="teams">
@@ -200,7 +201,7 @@ function matchCard(m, showLeague = false) {
       <div class="team-line">${crest(m.away)}<span class="nm">${esc(m.away.short)}${reds(m.away.redCards)}</span><span class="sc">${m.state === 'pre' ? '' : m.away.score}</span></div>
     </div>
     ${cardChance(m)}
-    ${hot ? `<div class="soon">⚡ Goal expected soon${p.medianNextGoal ? ` · likely within ~${p.medianNextGoal} min` : ''}</div>` : ''}
+    ${hot ? `<div class="soon">⚡ High goal scope · most likely ${p.mostLikelyMore} more ${untilEnd(p.phase)}</div>` : ''}
     ${whyLine(m)}
   </a>`;
 }
@@ -234,10 +235,10 @@ function renderList() {
     body = `<div class="empty muted">${state.tab === 'live' ? `No matches are live right now${state.usingDemo ? '' : ` across the ${espnScan.leagues}+ competitions scanned`}.` : 'Nothing here right now.'}
       ${state.tab === 'live' && c.upcoming ? '<p><button class="btn" data-tab="upcoming">See upcoming matches</button></p>' : ''}</div>`;
   } else if (byChance) {
-    const hot = list.filter((m) => state.details.has(keyOf(m)) && predFor(m).soonLevel === 'hot');
+    const hot = list.filter((m) => state.details.has(keyOf(m)) && predFor(m).scopeLevel === 'high');
     const rest = list.filter((m) => !hot.includes(m));
-    if (hot.length) body += `<div class="league-head watch">⚡ Goal watch · ${hot.length} match${hot.length > 1 ? 'es' : ''} where a goal is expected soon</div>${hot.map((m) => matchCard(m, true)).join('')}`;
-    body += `<div class="league-head">${hot.length ? 'Other live matches' : 'Live matches'} · most likely goal first</div>${rest.map((m) => matchCard(m, true)).join('')}`;
+    if (hot.length) body += `<div class="league-head watch">⚡ High goal scope · ${hot.length} match${hot.length > 1 ? 'es' : ''} where more goals are very likely</div>${hot.map((m) => matchCard(m, true)).join('')}`;
+    body += `<div class="league-head">${hot.length ? 'Other live matches' : 'Live matches'} · most goals expected first</div>${rest.map((m) => matchCard(m, true)).join('')}`;
   } else {
     let lastLeague = null;
     for (const m of list) {
@@ -250,7 +251,7 @@ function renderList() {
     : state.error ? `<div class="banner">Refresh failed: ${esc(state.error)}</div>` : '';
   view.innerHTML = `${banner}
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${state.tab === k}">${l}<span class="count">${c[k]}</span></button>`).join('')}</div>
-    ${state.tab === 'live' ? `<div class="chips sort"><button class="chip" data-sort="chance" aria-pressed="${state.sort === 'chance'}">⚡ Most likely goal</button><button class="chip" data-sort="league" aria-pressed="${state.sort === 'league'}">By league</button></div>` : ''}
+    ${state.tab === 'live' ? `<div class="chips sort"><button class="chip" data-sort="chance" aria-pressed="${state.sort === 'chance'}">⚡ Most goals expected</button><button class="chip" data-sort="league" aria-pressed="${state.sort === 'league'}">By league</button></div>` : ''}
     ${leagues.length > 1 ? `<div class="chips">${[['all', `All (${leagues.length})`], ...leagues].map(([k, l]) => `<button class="chip" data-league="${esc(k)}" aria-pressed="${state.league === k}">${esc(l)}</button>`).join('')}</div>` : ''}
     ${body}
     ${footer()}
@@ -349,11 +350,12 @@ function matchHTML(m, d, err) {
     ? `<section class="card section"><h3>Result</h3><p>Final score ${m.home.score}–${m.away.score}. Before kick-off the model expected about
         <b>${(p.fullMatch.home + p.fullMatch.away).toFixed(1)}</b> goals (${p.fullMatch.home.toFixed(1)} – ${p.fullMatch.away.toFixed(1)}).</p></section>`
     : `<section class="card section">
-      ${live ? `<div class="headline ${p.soonLevel}">
+      ${live ? `<div class="headline ${p.scopeLevel}">
         <div class="hl-match">${esc(m.home.name)} vs ${esc(m.away.name)} · ${esc(statusLabel(m))} · ${m.home.score}–${m.away.score}</div>
         <div class="hl-text">${p.phase === 'PEN' ? 'The match has gone to penalties. Shoot-out penalties don\'t count as match goals, so no more goals are expected.'
-          : `${p.soonLevel === 'hot' ? '⚡ A goal is expected soon.' : p.soonLevel === 'warm' ? 'A goal is possible soon.' : 'A quiet spell is more likely right now.'}
-          <b>${pct(p.pNext15)}</b> chance of a goal in the ${windowLabel(p.phase)}${p.medianNextGoal ? `; half the time the next goal comes within <b>~${p.medianNextGoal} min</b> of play` : ''}.`}</div>
+          : `About <b>${moreGoals(p.expectedMore)}</b> expected ${untilEnd(p.phase)}. <b>${pct(p.pMoreGoal)}</b> chance of at least one more goal;
+          most likely <b>${p.mostLikelyMore === 0 ? 'no more goals' : `${p.mostLikelyMore} more`}</b>.`}</div>
+        ${p.phase === 'PEN' ? '' : `<div class="hl-dist">${p.moreDist.map((v, k) => `<span>${k === 5 ? '5+' : k} more <b>${pct(v)}</b></span>`).slice(0, 4).join('')}<span>4+ more <b>${pct(p.moreDist[4] + p.moreDist[5])}</b></span></div>`}</div>
       </div>` : ''}
       <h3>${live ? 'Will there be another goal before full time?' : 'Will there be goals?'}</h3>
       <div class="verdict">${gauge(p.pMoreGoal)}
@@ -363,7 +365,6 @@ function matchHTML(m, d, err) {
         </div>
       </div>
       <div class="kpis">
-        ${live ? `<div class="kpi"><b>${pct(p.pNext15)}</b><span>goal in ${windowLabel(p.phase)}</span></div>` : ''}
         <div class="kpi"><b>${p.expectedMore.toFixed(2)}</b><span>expected ${live ? 'more ' : ''}goals</span></div>
         <div class="kpi"><b>${p.expectedFinalTotal.toFixed(1)}</b><span>expected final total</span></div>
         <div class="kpi"><b>${p.expectedMoreHome.toFixed(2)} · ${p.expectedMoreAway.toFixed(2)}</b><span>${H} · ${A} xG ${live ? 'remaining' : ''}</span></div>

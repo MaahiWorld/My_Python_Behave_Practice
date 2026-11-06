@@ -132,6 +132,13 @@ function cardChance(m) {
   </div>`;
 }
 
+function whyLine(m) {
+  const hit = state.details.get(keyOf(m));
+  if (!hit || m.state === 'post') return '';
+  const p = predict(m, hit.detail);
+  return p.summary.length ? `<div class="why">Why: ${esc(p.summary.join(' · '))}</div>` : '';
+}
+
 function matchCard(m) {
   return `<a class="card match" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}" data-key="${esc(keyOf(m))}">
     <div class="status ${m.state === 'in' ? 'live' : ''}">${esc(statusLabel(m))}</div>
@@ -140,12 +147,13 @@ function matchCard(m) {
       <div class="team-line">${crest(m.away)}<span class="nm">${esc(m.away.short)}${reds(m.away.redCards)}</span><span class="sc">${m.state === 'pre' ? '' : m.away.score}</span></div>
     </div>
     ${cardChance(m)}
+    ${whyLine(m)}
   </a>`;
 }
 
 function patchCard(m) {
-  const el = view.querySelector(`[data-key="${CSS.escape(keyOf(m))}"] .chance`);
-  if (el) el.outerHTML = cardChance(m);
+  const el = view.querySelector(`[data-key="${CSS.escape(keyOf(m))}"]`);
+  if (el) el.outerHTML = matchCard(m);
 }
 
 function renderList() {
@@ -337,12 +345,27 @@ function matchHTML(m, d, err) {
     <div class="lineups"><div><h4>${H}</h4>${lineupList(d?.lineups?.home)}</div><div><h4>${A}</h4>${lineupList(d?.lineups?.away)}</div></div>
   </section>`;
 
-  const how = `<section class="card section"><h3>How this was calculated</h3><ol class="factors">${p.factors.map((f) => `<li>${esc(f)}</li>`).join('')}</ol></section>`;
+  const sign = (v) => (Math.abs(v) < 0.005 ? '±0.00' : `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`);
+  const conf = p.confidence;
+  const how = `<section class="card section why-sec"><h3>Why this prediction</h3>
+    <div class="conf conf-${conf.level.toLowerCase()}"><b>${conf.level} confidence</b>
+      <span>Based on ${esc(conf.have.join(', ') || 'the score and clock only')}.${conf.missing.length ? ` Missing: ${esc(conf.missing.join(', '))}.` : ''}</span></div>
+    <ol class="steps">${p.reasons.map((r, i) => `<li class="step ${r.impact}">
+      <div class="step-head"><span class="step-n">${i + 1}</span><b>${esc(r.title)}</b>
+        <span class="delta">${i === 0 ? r.delta.toFixed(2) : sign(r.delta)}</span></div>
+      <p>${esc(r.detail)}</p>
+      ${r.evidence?.length ? `<details><summary>Evidence</summary><ul>${r.evidence.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></details>` : ''}
+    </li>`).join('')}
+    <li class="step total"><div class="step-head"><span class="step-n">=</span><b>${post ? 'Match finished' : `${p.expectedMore.toFixed(2)} expected ${live ? 'more ' : ''}goals`}</b></div>
+      <p>${post ? 'No more goals possible.' : `Goals arrive close to randomly at that rate, so the chance of at least one is 1 − e<sup>−${p.expectedMore.toFixed(2)}</sup> = <b>${pct(p.pMoreGoal)}</b>. The same rate gives the 0/1/2/3+ goal probabilities above.`}</p></li>
+    </ol>
+    <p class="muted small">Column on the right: how many expected goals each step adds (+) or removes (−).</p>
+  </section>`;
 
   return `<a class="back" href="#/">‹ All matches</a>
     ${scoreboard(m)}
     ${err ? `<div class="banner" style="margin-top:12px">Detailed stats unavailable (${esc(err)}). Showing an estimate from the score and clock only.</div>` : ''}
-    ${verdict}${statsRunner}${form}${h2hSec}${lineups}${how}
+    ${verdict}${how}${statsRunner}${form}${h2hSec}${lineups}
     <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
 }
 

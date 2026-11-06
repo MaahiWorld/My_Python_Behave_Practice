@@ -98,65 +98,164 @@ function pressureFactor(stats, minute) {
   return 1 + (raw - 1) * w;
 }
 
+const f2 = (v) => v.toFixed(2);
+const vsAvg = (x) => {
+  const d = Math.round((x - 1) * 100);
+  return d === 0 ? 'exactly league average' : `${Math.abs(d)}% ${d > 0 ? 'above' : 'below'} league average`;
+};
+const perGame = (t, k) => (t && t.gp ? (t[k] / t.gp).toFixed(2) : null);
+function formLine(form) {
+  if (!form?.length) return null;
+  const gf = form.reduce((s, g) => s + g.gf, 0);
+  const ga = form.reduce((s, g) => s + g.ga, 0);
+  return `last ${form.length}: ${form.map((g) => g.res).join('')}, scored ${gf}, conceded ${ga}`;
+}
+
+// Confidence in the inputs: how much real evidence fed the model.
+function confidence(match, detail, h2h) {
+  const have = [], missing = [];
+  const t = detail.table || {};
+  if (t.home?.gp >= 5 && t.away?.gp >= 5) have.push('season goal records for both teams');
+  else missing.push('season goal records (cup game or early season)');
+  if (detail.form?.home?.length && detail.form?.away?.length) have.push('recent form for both teams');
+  else missing.push('recent form');
+  if (h2h.n >= 3) have.push(`${h2h.n} head-to-head meetings`);
+  else missing.push('enough head-to-head history');
+  if (match.state === 'in') {
+    const ls = detail.liveStats?.home;
+    if (ls && Number.isFinite(ls.shotsOnTarget)) have.push('live shot data');
+    else missing.push('live shot data');
+  }
+  const score = have.length / (have.length + missing.length);
+  return { level: score >= 0.75 ? 'High' : score >= 0.45 ? 'Medium' : 'Low', have, missing };
+}
+
 export function predict(match, detail = {}) {
   const mu = detail.leagueAvg || DEFAULT_LEAGUE_AVG;
   const home = { ...match.home, form: detail.form?.home, table: detail.table?.home };
   const away = { ...match.away, form: detail.form?.away, table: detail.table?.away };
+  const H = home.short || home.name;
+  const A = away.short || away.name;
   const sh = teamStrength(home, mu);
   const sa = teamStrength(away, mu);
-  const factors = [];
+  const reasons = [];
+  let rh, ra;
+  // Records one reasoning step and how much it moved the expected goals still to come.
+  const step = (r, fn) => {
+    const before = rh + ra;
+    fn();
+    const delta = rh + ra - before;
+    reasons.push({ ...r, delta, impact: Math.abs(delta) < 0.02 ? 'neutral' : delta > 0 ? 'up' : 'down' });
+  };
 
-  // Full-match expected goals.
-  let lh = mu * sh.att * sa.def * HOME_ADV;
-  let la = (mu * sa.att * sh.def) / HOME_ADV;
-  factors.push(`Base: league avg ${mu.toFixed(2)} goals/team, home advantage ×${HOME_ADV}.`);
-  factors.push(
-    `${home.short || home.name} attack ×${sh.att.toFixed(2)}, defence ×${sh.def.toFixed(2)} (${sh.source}); ` +
-      `${away.short || away.name} attack ×${sa.att.toFixed(2)}, defence ×${sa.def.toFixed(2)} (${sa.source}).`
-  );
+  // 1. Baseline: an average match in this league.
+  rh = mu * HOME_ADV;
+  ra = mu / HOME_ADV;
+  reasons.push({
+    key: 'baseline', title: 'Starting point: an average match', delta: rh + ra, impact: 'neutral',
+    short: `league average ${f2(mu * 2)} goals/match`,
+    detail: `An average team in this competition scores ${f2(mu)} goals per match${detail.leagueAvg ? ' (from this season\'s table)' : ' (typical top-flight figure; no table available)'}. ` +
+      `Home sides score about 10% more and away sides about 10% less, so we start from ${f2(rh)} for ${H} and ${f2(ra)} for ${A}: ${f2(rh + ra)} goals in a full match.`,
+  });
 
+  // 2. Attack vs defence.
+  step({
+    key: 'strength', title: 'Attacking power vs defensive strength',
+    short: (() => {
+      const best = [[sh.att, `${H} score`], [sa.att, `${A} score`], [sh.def, `${H} concede`], [sa.def, `${A} concede`]]
+        .sort((x, y) => Math.abs(y[0] - 1) - Math.abs(x[0] - 1))[0];
+      return `${best[1]} ${vsAvg(best[0]).replace('league average', 'avg')}`;
+    })(),
+    detail: `${H} score at a rate ${vsAvg(sh.att)} and concede at a rate ${vsAvg(sh.def)}. ` +
+      `${A} score at a rate ${vsAvg(sa.att)} and concede at a rate ${vsAvg(sa.def)}. ` +
+      `Each side's expected goals = its attack × the opponent's defence, giving ${f2(rh * sh.att * sa.def)} for ${H} and ${f2(ra * sa.att * sh.def)} for ${A}.`,
+    evidence: [
+      perGame(home.table, 'gf') && `${H} season: ${perGame(home.table, 'gf')} scored, ${perGame(home.table, 'ga')} conceded per game over ${home.table.gp} games`,
+      formLine(home.form) && `${H} ${formLine(home.form)}`,
+      perGame(away.table, 'gf') && `${A} season: ${perGame(away.table, 'gf')} scored, ${perGame(away.table, 'ga')} conceded per game over ${away.table.gp} games`,
+      formLine(away.form) && `${A} ${formLine(away.form)}`,
+      'Season record weighted 70%, last 5 games 30%; small samples are pulled toward average so one big result can\'t dominate.',
+    ].filter(Boolean),
+  }, () => { rh *= sh.att * sa.def; ra *= sa.att * sh.def; });
+
+  // 3. Head to head.
   const h2h = h2hSummary(detail.h2h, match.home.id);
   if (h2h.n >= 2) {
     const w = (Math.min(h2h.n, 6) / 6) * 0.25;
-    const adj = clamp(1 + w * (h2h.avgGoals / (lh + la) - 1), 0.8, 1.25);
-    lh *= adj;
-    la *= adj;
-    factors.push(`Head-to-head: ${h2h.avgGoals.toFixed(1)} goals/game over ${h2h.n} meetings → ×${adj.toFixed(2)}.`);
+    const modelTotal = rh + ra;
+    const adj = clamp(1 + w * (h2h.avgGoals / modelTotal - 1), 0.8, 1.25);
+    step({
+      key: 'h2h', title: 'Head-to-head history',
+      short: `past meetings average ${h2h.avgGoals.toFixed(1)} goals`,
+      detail: `Their last ${h2h.n} meetings averaged ${h2h.avgGoals.toFixed(1)} goals, ${h2h.avgGoals > modelTotal ? 'more' : 'fewer'} than the ${f2(modelTotal)} the form figures predict. ` +
+        `Meetings between the same two clubs carry some stylistic signal but are small samples, so they get a ${Math.round(w * 100)}% weight: expected goals ×${f2(adj)}.`,
+      evidence: [`${H} won ${h2h.homeWins}, ${h2h.draws} drawn, ${A} won ${h2h.awayWins}`, `Both teams scored in ${h2h.btts} of ${h2h.n}`],
+    }, () => { rh *= adj; ra *= adj; });
   }
-  const fullHome = lh;
-  const fullAway = la;
+  const fullHome = rh;
+  const fullAway = ra;
 
-  // Live adjustments.
+  // 4. Time left.
   const live = match.state === 'in';
   const minute = live ? match.minute || 0 : 0;
   const share = remainingShare(minute, match.state);
-  let rh = lh * share;
-  let ra = la * share;
   if (live) {
-    factors.push(`Minute ${minute}: ${(share * 100).toFixed(0)}% of the match's goal expectancy remains.`);
+    step({
+      key: 'time', title: 'Time remaining',
+      short: `${Math.max(0, 90 - minute)} min + stoppage left`,
+      detail: `${minute} minutes played. About 45% of goals come in the first half and 55% in the second, so ${Math.round(share * 100)}% of a full match's expected goals are still to come (stoppage time included).`,
+    }, () => { rh *= share; ra *= share; });
+
+    // 5. Scoreline.
     const diff = (match.home.score || 0) - (match.away.score || 0);
     if (diff !== 0) {
       const k = Math.min(Math.abs(diff), 2);
       const trail = 1 + 0.12 * k;
       const lead = 1 - 0.06 * k;
-      if (diff > 0) { rh *= lead; ra *= trail; } else { rh *= trail; ra *= lead; }
-      factors.push(`Scoreline: trailing side pushes (×${trail.toFixed(2)}), leader sits deeper (×${lead.toFixed(2)}).`);
+      const trailer = diff > 0 ? A : H;
+      const leader = diff > 0 ? H : A;
+      step({
+        key: 'score', title: 'Game state',
+        short: `${trailer} chasing the game`,
+        detail: `${trailer} are ${Math.abs(diff)} down and will commit more players forward (their scoring rate ×${f2(trail)}), while ${leader} tend to protect the lead (×${f2(lead)}). The number on the right is the net effect on total goals.`,
+      }, () => { if (diff > 0) { rh *= lead; ra *= trail; } else { rh *= trail; ra *= lead; } });
+    } else {
+      reasons.push({ key: 'score', title: 'Game state', delta: 0, impact: 'neutral', short: 'level game',
+        detail: 'The scores are level, so neither side is forced to chase the game; no adjustment.' });
     }
+
+    // 6. Red cards.
     const redH = match.home.redCards || 0;
     const redA = match.away.redCards || 0;
     if (redH || redA) {
-      rh *= Math.pow(0.7, redH) * Math.pow(1.2, redA);
-      ra *= Math.pow(0.7, redA) * Math.pow(1.2, redH);
-      factors.push(`Red cards (home ${redH}, away ${redA}) applied.`);
+      step({
+        key: 'red', title: 'Red cards',
+        short: `${redH ? H : A} down to ${11 - (redH || redA)} men`,
+        detail: `${[redH && `${H} have had ${redH} sent off`, redA && `${A} have had ${redA} sent off`].filter(Boolean).join(' and ')}. ` +
+          'A team a player down typically scores about 30% less and concedes about 20% more for the rest of the match.',
+      }, () => {
+        rh *= Math.pow(0.7, redH) * Math.pow(1.2, redA);
+        ra *= Math.pow(0.7, redA) * Math.pow(1.2, redH);
+      });
     }
-    const ph = pressureFactor(detail.liveStats?.home, minute);
-    const pa = pressureFactor(detail.liveStats?.away, minute);
+
+    // 7. Live shot pressure.
+    const lh = detail.liveStats?.home, la = detail.liveStats?.away;
+    const ph = pressureFactor(lh, minute);
+    const pa = pressureFactor(la, minute);
     if (ph !== 1 || pa !== 1) {
-      rh *= ph;
-      ra *= pa;
-      factors.push(`Live shot pressure: home ×${ph.toFixed(2)}, away ×${pa.toFixed(2)}.`);
+      const pace = (s) => (s.shotsOnTarget / minute * 90).toFixed(1);
+      step({
+        key: 'pressure', title: 'Live attacking pressure',
+        short: ph * pa >= 1 ? 'shots on target above normal pace' : 'few shots on target so far',
+        detail: `Shots on target are the best live sign of chances being created. ${H} have ${lh.shotsOnTarget} (on pace for ${pace(lh)} per 90) and ${A} have ${la?.shotsOnTarget ?? 0} (${la ? pace(la) : '0.0'} per 90); a typical side manages about 4.5. ` +
+          `The further into the match, the more this is trusted: ${H} ×${f2(ph)}, ${A} ×${f2(pa)}.`,
+        evidence: [lh?.shots != null && `Total shots ${lh.shots}–${la?.shots ?? 0}`, lh?.possession != null && `Possession ${lh.possession}%–${la?.possession ?? 0}%`].filter(Boolean),
+      }, () => { rh *= ph; ra *= pa; });
     }
   }
+  if (match.state === 'post') { rh = 0; ra = 0; }
+  const conf = confidence(match, detail, h2h);
 
   const hs = match.home.score || 0;
   const as = match.away.score || 0;
@@ -209,6 +308,9 @@ export function predict(match, detail = {}) {
     ratings: { home: ratings(home, sh), away: ratings(away, sa) },
     strength: { home: sh, away: sa },
     h2h,
-    factors,
+    reasons,
+    confidence: conf,
+    summary: reasons.filter((r) => !['baseline', 'time'].includes(r.key) && r.impact !== 'neutral')
+      .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta)).slice(0, 2).map((r) => r.short),
   };
 }

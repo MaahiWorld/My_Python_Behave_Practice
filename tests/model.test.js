@@ -222,3 +222,22 @@ test('each input moves the goal scope the right way: attack/defence, recent form
   const trust = (p) => p.reasons.find((r) => r.key === 'live').detail.match(/(\d+)% weight/)[1];
   assert.ok(+trust(late) > +trust(early));
 });
+
+test('first-half goal chances, pre-match and live', async () => {
+  const { predict: pr } = await import('../js/model.js');
+  const T2 = (id, score = 0) => ({ id, name: id, short: id, abbr: id, score });
+  const base = { id: '1', league: 'x', leagueName: 'X', date: '2026-11-06T15:00:00Z', home: T2('h'), away: T2('a') };
+  const pre = pr({ ...base, state: 'pre', minute: 0 });
+  assert.ok(pre.firstHalf.over05 > 0.6 && pre.firstHalf.over05 < 0.8);
+  assert.ok(pre.firstHalf.over15 < pre.firstHalf.over05);
+  const early = pr({ ...base, state: 'in', minute: 10, phase: 'H1' });
+  const late = pr({ ...base, state: 'in', minute: 40, phase: 'H1' });
+  assert.ok(late.firstHalf.over05 < early.firstHalf.over05);
+  const scored = pr({ ...base, state: 'in', minute: 30, phase: 'H1', home: T2('h', 1) });
+  assert.equal(scored.firstHalf.over05, 1);
+  const second = pr({ ...base, state: 'in', minute: 60, phase: 'H2', ht: { home: 1, away: 1 } });
+  assert.deepEqual([second.firstHalf.decided, second.firstHalf.over15], [true, 1]);
+  const o = pre.outcome;
+  assert.ok(Math.abs(o.homeWin + o.draw + o.awayWin - 1) < 1e-9);
+  assert.ok(o.homeWin > o.awayWin, 'home advantage');
+});

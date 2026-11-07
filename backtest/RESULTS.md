@@ -30,6 +30,33 @@ Run on 2026-11-06 with `backtest/fetch-data.sh` + `backtest/run.js`; full figure
 For comparison, Over 1.5 happened in **79.1 of 100** high-confidence matches anyway, so the picks
 are about **6 points better than always backing Over 1.5**.
 
+## New markets (added 2026-11-07): full-time result and first-half goals
+
+Same data, same method, same train/test split. The half-time scores in the data let the
+first-half markets be tested too.
+
+| On unseen seasons (2024-25 to 2026-27) | Picks | Correct | Model claimed | Base rate |
+| --- | --- | --- | --- | --- |
+| **Full-time result (1X2)**, model ≥ 70%, checks ≥ 60% | 109 | **82.6 of 100** (90) | 74.6 | home win 44.8 overall |
+| **1st half Over 0.5**, model ≥ 78%, checks ≥ 70% | 247 | **81.4 of 100** (201) | 79.6 | 76.5 |
+| 1st half Over 1.5 / Under 1.5, model ≥ 80% | 0 | – | – | Under 1.5: 63.0 |
+
+All Goal-market picks together on unseen seasons: **84.5 of 100** (1,654 of 1,957).
+
+- **1X2 needed its own calibration.** The goal model tempers team differences (good for goal
+  totals), which made win chances far too flat: when it said 62% the favourite actually won 86%.
+  For the result only, the ratio of the two teams' scoring rates is raised to a fitted power
+  (`PARAMS.resultSharpen` = 1.7, fitted on the training seasons by log loss; total goals unchanged).
+  After that, 50–70% predictions are about right; above 70% it is still under-confident
+  (73% said, 86% happened, 158 matches), which is why the 70% bar is enough. Every 1X2 pick so far
+  has been a home win.
+- **1st half Over 0.5** is slightly under-confident (73% said, 79% happened). The 78% bar was chosen on
+  the training seasons (543 picks, 81.8% correct) and held up on the unseen ones.
+- **1st half Over 1.5 / Under 1.5** is over-confident at 70–80% on training data (72% said, 67%
+  happened), so it keeps the default 80% bar and gives no pre-match picks. Live picks late in the
+  first half are possible but untested (the data has no in-play timing).
+- Thresholds were chosen with `minProb` / `minCheck` sweeps on the training seasons only.
+
 ## Every high-confidence match (not just picks)
 
 Calling whichever side the model rates above 50%:

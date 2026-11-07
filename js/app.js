@@ -1,9 +1,11 @@
 import { SOURCES, sourceById, afQuota } from './sources.js';
-import { scanStats as espnScan, fetchUpcoming } from './api.js';
+import { scanStats as espnScan, fetchUpcoming, fetchResult } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
-import { MARKETS, RULES, marketPicks, evaluateMarkets, recordPicks, settlePicks, trackRecord } from './markets.js';
+import { MARKETS, RULES, marketPicks, evaluateMarkets, recordPicks, settlePicks, trackRecord, bestSide, sideLabel, marketById, settleFootball } from './markets.js';
+import { loadRecords, updateRecords, summarize, toCSV, saveRecords } from './records.js';
+import { fetchTennis, fetchTennisDay, predictTennis, tennisMarkets, recordTennisPicks, settleTennisPicks, settleTennisMarket, scoreState, TENNIS_MARKETS, TENNIS_RULES, demoTennis } from './tennis.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -35,6 +37,8 @@ const state = {
   upcoming: [], // next 7 days in the best-known competitions (Goal markets page)
   upcomingAt: 0,
   upLeague: 'all',
+  tennis: [], tennisAt: 0, tennisError: null, tennisMarket: store.get('tmarket', 'tw'), tennisTab: 'all',
+  res: { sport: 'all', status: 'all', market: 'all' }, checking: false, checkMsg: '',
   league: 'all',
   details: new Map(), // key -> { detail, at }
   error: null,
@@ -130,6 +134,8 @@ function rerenderSoon() {
     const r = route().name;
     if (r === 'list') renderList();
     else if (r === 'markets') renderMarkets();
+    else if (r === 'tennis') renderTennis();
+    else if (r === 'results') renderResults();
   }, 700);
 }
 const warmable = (m) => (m.league === 'demo' || !sourceById(m.source).needsKey)
@@ -159,6 +165,8 @@ function route() {
   const h = location.hash.replace(/^#\/?/, '');
   if (h === 'sources') return { name: 'sources' };
   if (h === 'markets') return { name: 'markets' };
+  if (h === 'tennis') return { name: 'tennis' };
+  if (h === 'results') return { name: 'results' };
   const m = h.match(/^m\/([^/]+)\/(.+)$/);
   return m ? { name: 'match', league: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : { name: 'list' };
 }
@@ -168,6 +176,8 @@ function render() {
   if (r.name === 'match') renderMatch(r);
   else if (r.name === 'sources') renderSources();
   else if (r.name === 'markets') { renderMarkets(); warm(); loadUpcoming(); }
+  else if (r.name === 'tennis') { loadTennis(); renderTennis(); }
+  else if (r.name === 'results') { renderResults(); checkResults(); }
   else renderList();
 }
 
@@ -341,12 +351,21 @@ view.addEventListener('click', (e) => {
   if (ul) { state.upLeague = ul.dataset.upleague; renderMarkets(); return; }
   const mt = e.target.closest('[data-market]');
   if (mt) { state.market = mt.dataset.market; store.set('market', state.market); renderMarkets(); return; }
+  const tm = e.target.closest('[data-tmarket]');
+  if (tm) { state.tennisMarket = tm.dataset.tmarket; store.set('tmarket', state.tennisMarket); renderTennis(); return; }
+  const tt = e.target.closest('[data-ttab]');
+  if (tt) { state.tennisTab = tt.dataset.ttab; renderTennis(); return; }
+  const rf = e.target.closest('[data-res]');
+  if (rf) { const [k, v] = rf.dataset.res.split(':'); state.res[k] = v; if (k === 'sport') state.res.market = 'all'; renderResults(); return; }
+  const ra = e.target.closest('[data-resact]');
+  if (ra) { resultsAction(ra.dataset.resact); return; }
   const so = e.target.closest('[data-sort]');
   if (so) { state.sort = so.dataset.sort; store.set('sort', state.sort); renderList(); }
 });
 
 function nav(current) {
-  return `<nav class="nav"><a href="#/" ${current === 'list' ? 'aria-current="page"' : ''}>Matches</a><a href="#/markets" ${current === 'markets' ? 'aria-current="page"' : ''}>Goal markets</a></nav>`;
+  const link = (href, id, label) => `<a href="${href}" ${current === id ? 'aria-current="page"' : ''}>${label}</a>`;
+  return `<nav class="nav">${link('#/', 'list', 'Matches')}${link('#/markets', 'markets', 'Markets')}${link('#/tennis', 'tennis', 'Tennis')}${link('#/results', 'results', 'Results')}</nav>`;
 }
 
 // ---- Upcoming fixtures (next 7 days, best-known competitions) ----
@@ -394,9 +413,10 @@ function backtestLine(id) {
   const t = backtest?.test;
   if (!t) return '';
   const m = t.picks.byMarket[id];
+  if (!m) return '';
   const base = t.highConfidenceMarkets[id];
   const txt = m.picks
-    ? `<b>${Math.round(m.hitRate)} of 100</b> correct (${m.won.toLocaleString()} of ${m.picks.toLocaleString()} picks)${id === 'o15' ? `; Over 1.5 happens ${Math.round(base.baseline)} in 100 anyway` : ''}`
+    ? `<b>${Math.round(m.hitRate)} of 100</b> correct (${m.won.toLocaleString()} of ${m.picks.toLocaleString()} picks)${id === 'o15' || id === 'h1o05' ? `; ${id === 'o15' ? 'Over 1.5' : 'a first-half goal'} happens ${Math.round(base.baseline)} in 100 anyway` : ''}`
     : `no pick reached the confidence bar in ${t.data.matches.toLocaleString()} matches, so expect this tab to be empty most of the time`;
   return `<p class="small">Backtest on ${t.data.seasons} (${t.data.matches.toLocaleString()} past matches the model wasn't tuned on): ${txt}. <a href="https://github.com/MaahiWorld/My_Python_Behave_Practice/blob/main/backtest/RESULTS.md" target="_blank" rel="noopener">Details</a></p>`;
 }
@@ -429,15 +449,16 @@ function renderMarkets() {
     </a>`;
   };
   view.innerHTML = `${nav('markets')}
-    <div class="tabs" role="tablist">${MARKETS.map((x) => `<button class="tab" role="tab" data-market="${x.id}" aria-selected="${x.id === mk.id}">${x.id === 'btts' ? 'BTTS' : x.yes}<span class="count">${counts[x.id]}</span></button>`).join('')}</div>
+    <div class="tabs wrap" role="tablist">${MARKETS.map((x) => `<button class="tab" role="tab" data-market="${x.id}" aria-selected="${x.id === mk.id}">${esc(x.tab)}<span class="count">${counts[x.id]}</span></button>`).join('')}</div>
     <div class="card section record"><h3>${esc(mk.name)} · track record</h3><p class="small">On this device: ${record}</p>${backtestLine(mk.id)}</div>
     <details class="howto"><summary>How picks are validated</summary>
       <ol>
         <li>The match prediction must be <b>high confidence</b>: season attack/defence records and recent form for both teams, plus current match stats when live.</li>
-        <li>The model must give the pick at least <b>${Math.round(RULES.minProb * 100)}%</b>.</li>
-        <li>Independent cross-checks must all agree (at least ${Math.round(RULES.minCheck * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
-        <li>Markets already decided (e.g. Over 1.5 with two goals in) are left out.</li>
+        <li>The model must give the pick at least <b>${Math.round((mk.minProb ?? RULES.minProb) * 100)}%</b>${mk.minProb ? ' (this market\'s own bar, set on the backtest\'s training seasons)' : ''}.</li>
+        <li>Independent cross-checks must all agree (at least ${Math.round((mk.minCheck ?? RULES.minCheck) * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
+        <li>Markets already decided (e.g. Over 1.5 with two goals in, or first-half markets after half time) are left out.</li>
       </ol>
+      <p class="small">Settles on: ${esc(mk.rule)}. Every pick is checked after full time on the <a href="#/results">Results</a> page.</p>
       <p class="muted small">Covers live matches, matches starting today, and the next 7 days in the best-known competitions (free ESPN data). Statistical estimates, not betting advice.</p>
     </details>
     ${list.length ? list.map(card).join('') : `<div class="empty muted">No validated ${esc(mk.name)} picks right now.${pending ? `<br>Analysing ${pending} match${pending > 1 ? 'es' : ''}…` : ''}</div>`}
@@ -465,9 +486,10 @@ function upcomingFixtures(mk, picks) {
     const day = new Date(m.date).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
     if (day !== lastDay) { html += `<div class="fx-day">${esc(day)}</div>`; lastDay = day; }
     const cell = (x) => {
-      const v = p[x.key];
       const isPick = picked.has(`${keyOf(m)}|${x.id}`);
-      return `<span class="fx-p ${x.id === mk.id ? 'sel' : ''} ${isPick ? 'fx-pick' : ''}" title="${esc(x.name)}"><small>${x.id === 'btts' ? 'BTTS' : x.yes.replace('Over ', 'O')}</small>${pct(v)}${isPick ? ' ✓' : ''}</span>`;
+      let small = x.tab, v;
+      if (x.sides) { const b = bestSide(x, p); v = b.p; small = `${x.tab} ${{ home: '1', draw: 'X', away: '2' }[b.side]}`; } else v = x.probs(p).yes;
+      return `<span class="fx-p ${x.id === mk.id ? 'sel' : ''} ${isPick ? 'fx-pick' : ''}" title="${esc(x.name)}"><small>${esc(small)}</small>${pct(v)}${isPick ? ' ✓' : ''}</span>`;
     };
     html += `<a class="fx" href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">
       <span class="fx-time">${new Date(m.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -477,7 +499,7 @@ function upcomingFixtures(mk, picks) {
   }
   return `<div class="card section fixtures"><h3>Upcoming fixtures · top leagues · next 7 days</h3>
     ${leagues.length > 1 ? `<div class="chips">${[['all', `All (${state.upcoming.length})`], ...leagues].map(([k, l]) => `<button class="chip" data-upleague="${esc(k)}" aria-pressed="${state.upLeague === k}">${esc(l)}</button>`).join('')}</div>` : ''}
-    <p class="small muted">Chance of Over 1.5 / Over 2.5 / both teams scoring for each match. ✓ marks a validated pick. Tap a match for the full reasoning.</p>
+    <p class="small muted">Chance of each market's Yes/Over side (1X2: the most likely result, 1 = home, X = draw, 2 = away) for each match. ✓ marks a validated pick. Tap a match for the full reasoning.</p>
     ${html || '<p class="small muted">No high-confidence predictions here yet.</p>'}
     <p class="small muted">${[shown && `${shown} shown`, thin && `${thin} hidden (not enough data for a high-confidence prediction)`, pending && `${pending} still being analysed…`, failed && `${failed} couldn't load their stats yet (retrying)`].filter(Boolean).join(' · ')}</p>
   </div>`;
@@ -505,15 +527,15 @@ function whyNoPicks(mk) {
       case 'pick': c.picks++; break;
       case 'decided': c.decided++; break;
       case 'low-confidence': c.thin++; for (const x of e.missing) c.missing[x] = (c.missing[x] || 0) + 1; break;
-      case 'low-prob': c.lowProb++; near.push({ m, e, gap: RULES.minProb - e.p, why: `${pct(e.p)} (needs ${pct(RULES.minProb)})` }); break;
+      case 'low-prob': c.lowProb++; near.push({ m, e, gap: e.need - e.p, why: `${pct(e.p)} (needs ${pct(e.need)})` }); break;
       case 'few-checks': c.fewChecks++; break;
-      case 'check-failed': c.checkFailed++; near.push({ m, e, gap: Math.max(...e.failed.map((f) => RULES.minCheck - f.p)), why: `${pct(e.p)}, but ${e.failed.map((f) => `${f.label.toLowerCase()} ${f.txt}`).join(', ')} (checks need ${pct(RULES.minCheck)})` }); break;
+      case 'check-failed': c.checkFailed++; near.push({ m, e, gap: Math.max(...e.failed.map((f) => e.needCheck - f.p)), why: `${pct(e.p)}, but ${e.failed.map((f) => `${f.label.toLowerCase()} ${f.txt}`).join(', ')} (checks need ${pct(e.needCheck)})` }); break;
       default: break;
     }
   }
   const rows = [
     [c.picks, 'gave a validated pick'],
-    [c.lowProb, `rated below ${pct(RULES.minProb)} for ${mk.name}`],
+    [c.lowProb, `rated below ${pct(mk.minProb ?? RULES.minProb)} for ${mk.name}`],
     [c.checkFailed, 'reached the bar, but a cross-check disagreed'],
     [c.fewChecks, 'had too few independent checks'],
     [c.decided, 'already decided on the scoreboard'],
@@ -533,8 +555,248 @@ function whyNoPicks(mk) {
     ${missing.length ? `<p class="small muted">Missing data: ${missing.map(([t, n]) => `${esc(t)} (${n})`).join('; ')}.</p>` : ''}
     ${errList.length ? `<p class="small muted">Load errors (retried automatically every few minutes): ${errList.map(([t, n]) => `“${esc(t)}” (${n})`).join('; ')}.</p>` : ''}
     ${near.length ? `<h3 style="margin-top:12px">Closest to a pick</h3><ul class="near">${near.slice(0, 5).map(({ m, e, why }) => `<li><a href="#/m/${encodeURIComponent(m.league)}/${encodeURIComponent(m.id)}">${esc(m.home.short)} vs ${esc(m.away.short)}</a> <span class="muted">· ${esc(statusLabel(m))}</span><br><b>${esc(e.label)}</b> ${esc(why)}</li>`).join('')}</ul>` : ''}
-    <p class="small muted">The bar is high on purpose: in the backtest about 1 match in 5 gave a pick, almost all Over 1.5.</p>
+    <p class="small muted">The bar is high on purpose: in the backtest about 1 match in 4 gave a pick, most of them Over 1.5.</p>
   </div>`;
+}
+
+// Every football market for one match: the model's best side and whether it's a validated pick.
+const STATUS_TXT = {
+  pick: 'validated pick', decided: 'already decided', 'low-confidence': 'not enough data', 'low-prob': 'below the bar',
+  'check-failed': 'a cross-check disagreed', 'few-checks': 'too few cross-checks', finished: 'finished',
+};
+function marketsPanel(m, d) {
+  if (m.state === 'post' || !d) return '';
+  const p = predict(m, d);
+  const rows = evaluateMarkets(m, d).map((e) => {
+    const b = bestSide(e.market, p);
+    if (!b) return `<tr><td>${esc(e.market.name)}</td><td colspan="2" class="muted">${e.market.id.startsWith('h1') ? 'first half over' : '–'}</td><td class="muted small">${STATUS_TXT[e.status] || ''}</td></tr>`;
+    const label = e.label || sideLabel(e.market, b.side, m);
+    const p100 = e.p ?? b.p;
+    const extra = e.market.sides ? ` <span class="muted small">(${e.market.sides.map((sd) => `${{ home: '1', draw: 'X', away: '2' }[sd]} ${pct(b.probs[sd])}`).join(' · ')})</span>` : '';
+    return `<tr class="${e.status === 'pick' ? 'is-pick' : ''}"><td>${esc(e.market.name)}</td><td><b>${esc(label)}</b>${extra}</td><td class="num">${pct(p100)}</td>
+      <td class="small ${e.status === 'pick' ? 'good' : 'muted'}">${e.status === 'pick' ? '✓ ' : ''}${STATUS_TXT[e.status] || ''}</td></tr>`;
+  }).join('');
+  return `<section class="card section"><h3>Markets for this match</h3>
+    <table class="mk-table"><tbody>${rows}</tbody></table>
+    <p class="muted small">Most likely side of each market. Only validated picks (see <a href="#/markets">Markets</a>) are recorded and checked on the <a href="#/results">Results</a> page.</p></section>`;
+}
+
+// ---- Tennis page ----
+let tennisPromise = null;
+function loadTennis(force = false) {
+  if (tennisPromise) return tennisPromise;
+  if (settings.demo) {
+    if (!state.tennis.length) { state.tennis = demoTennis(); state.tennisDemo = true; }
+    return Promise.resolve();
+  }
+  if (!force && Date.now() - state.tennisAt < 60_000) return Promise.resolve();
+  tennisPromise = fetchTennis({ proxy: settings.proxy, days: 1 })
+    .then((list) => { state.tennis = list; state.tennisError = null; state.tennisDemo = false; settleTennisPicks(list); })
+    .catch((e) => { state.tennisError = e.message || String(e); })
+    .finally(() => { state.tennisAt = Date.now(); tennisPromise = null; if (route().name === 'tennis') renderTennis(); });
+  return tennisPromise;
+}
+const tPredCache = new Map();
+function tPred(m) {
+  const k = `${m.tour}/${m.id}|${m.state}|${JSON.stringify([m.a.sets, m.b.sets, m.a.rank, m.b.rank])}`;
+  if (!tPredCache.has(k)) { if (tPredCache.size > 400) tPredCache.clear(); tPredCache.set(k, predictTennis(m)); }
+  return tPredCache.get(k);
+}
+const setsTxt = (m) => scoreState(m).sets.map(([x, y]) => `${x}-${y}`).join('  ');
+const tStatus = (m) => (m.state === 'in' ? 'Live' : m.state === 'post' ? 'Final' : statusLabel({ state: 'pre', date: m.date }));
+const rk = (pl) => (pl.rank ? `<span class="muted small">#${pl.rank}</span>` : '<span class="muted small">unranked</span>');
+
+function tennisCard(m) {
+  const p = m.state === 'post' ? null : tPred(m);
+  const mk = p ? tennisMarkets(m, p) : [];
+  const st = scoreState(m);
+  const line = (pl, side) => `<div class="team-line"><span class="nm">${esc(pl.name)} ${rk(pl)}${pl.winner ? ' ✓' : ''}</span>
+    <span class="sc tsets">${st.sets.map(([x, y]) => `<i>${side === 'a' ? x : y}</i>`).join('')}</span></div>`;
+  const chips = mk.map((x) => `<span class="drv ${x.status === 'pick' ? 'up' : 'neutral'}" title="${esc(TENNIS_MARKETS.find((t) => t.id === x.market).name)}">${esc(x.label)} ${pct(x.p)}${x.status === 'pick' ? ' ✓' : ''}</span>`).join('');
+  const detail = p && p.dist ? `<details class="t-more"><summary>Sets, games and likely scores</summary>
+      <p class="small">${esc(m.a.short)} win chance <b>${pct(p.pA)}</b>${p.preWin != null && m.state === 'in' ? ` (before the match: ${pct(p.preWin)})` : ''}.
+        Expected total games <b>${p.expectedGames.toFixed(1)}</b>. ${esc(m[p.dog].short)} win at least one set: <b>${pct(p.dogSet)}</b>.</p>
+      <div class="scores">${p.topScores.slice(0, 6).map(([sc, v]) => `<span class="score-pill"><b>${esc(sc)}</b>${pct(v)}</span>`).join('')}</div>
+      <p class="small">Sets: ${Object.entries(p.dist.sets).map(([n, v]) => `${n} sets ${pct(v)}`).join(' · ')}</p>
+      <p class="small">Games: ${p.gameLines.map((g) => `O${g.line} ${pct(g.over)}`).join(' · ')}</p>
+      <p class="muted small">Serve points won assumed: ${esc(m.a.short)} ${pct(p.pa)}, ${esc(m.b.short)} ${pct(p.pb)} (set so the ranking gap gives a ${pct(p.preWin ?? 0.5)} pre-match chance over best of 3).${p.confidence.missing.length ? ` Missing: ${esc(p.confidence.missing.join(', '))}.` : ''}</p>
+    </details>` : '';
+  return `<div class="card tmatch">
+    <div class="pick-top"><span class="lg-line">${esc([m.event, m.round].filter(Boolean).join(' · '))} · best of ${m.bestOf}</span><span class="status ${m.state === 'in' ? 'live' : ''}">${esc(tStatus(m))}</span></div>
+    <div class="teams">${line(m.a, 'a')}${line(m.b, 'b')}</div>
+    ${p?.confidence.level === 'Low' ? '<div class="muted small">No ranking for one of the players: shown for reference, no picks.</div>' : ''}
+    ${chips ? `<div class="drivers">${chips}</div>` : ''}
+    ${m.state === 'post' && m.void ? `<div class="muted small">${esc(m.detail || 'Retired / walkover')}</div>` : ''}
+    ${detail}
+  </div>`;
+}
+
+function renderTennis() {
+  const all = state.tennis;
+  const tabs = [['all', 'All'], ['in', 'Live'], ['pre', 'Upcoming'], ['post', 'Finished']];
+  const cnt = (s) => all.filter((m) => s === 'all' || m.state === s).length;
+  const list = all.filter((m) => state.tennisTab === 'all' || m.state === state.tennisTab)
+    .sort((a, b) => ({ in: 0, pre: 1, post: 2 }[a.state] - { in: 0, pre: 1, post: 2 }[b.state]) || new Date(a.date) - new Date(b.date));
+  const mk = TENNIS_MARKETS.find((x) => x.id === state.tennisMarket) || TENNIS_MARKETS[0];
+  const picks = [];
+  for (const m of all) {
+    if (m.state === 'post') continue;
+    const ps = tennisMarkets(m, tPred(m)).filter((x) => x.status === 'pick');
+    if (!state.tennisDemo) recordTennisPicks(m, ps);
+    for (const x of ps) picks.push({ m, x });
+  }
+  const shown = picks.filter((a) => a.x.market === mk.id).sort((a, b) => b.x.p - a.x.p);
+  const recs = loadRecords().filter((x) => x.sport === 'tennis' && x.market === mk.id);
+  const done = recs.filter((x) => x.result === 'won' || x.result === 'lost');
+  const won = done.filter((x) => x.result === 'won').length;
+  const pickCard = ({ m, x }) => `<div class="card pick">
+      <div class="pick-top"><span class="lg-line">${esc(m.event)}${m.round ? ` · ${esc(m.round)}` : ''}</span><span class="status ${m.state === 'in' ? 'live' : ''}">${esc(tStatus(m))}</span></div>
+      <div class="pick-teams">${esc(m.a.short)} ${rk(m.a)} vs ${esc(m.b.short)} ${rk(m.b)}${m.state === 'in' ? ` · <b>${esc(setsTxt(m))}</b>` : ''}</div>
+      <div class="pick-main"><span class="pick-label yes">${esc(x.label)}</span><span class="pick-p">${pct(x.p)}</span><span class="badge ready">Model only · untested</span></div>
+    </div>`;
+  const banner = state.tennisDemo ? '<div class="banner">Showing <b>demo tennis matches</b> (fictional players). Turn off demo mode in ⚙ for the live ATP/WTA feed.</div>'
+    : state.tennisError ? `<div class="banner">Couldn't load tennis (${esc(state.tennisError)}). ${all.length ? 'Showing the last list.' : 'Check your connection or set a CORS proxy in ⚙.'}</div>` : '';
+  view.innerHTML = `${banner}${nav('tennis')}
+    <div class="tabs wrap" role="tablist">${TENNIS_MARKETS.map((x) => `<button class="tab" role="tab" data-tmarket="${x.id}" aria-selected="${x.id === mk.id}">${esc(x.tab)}<span class="count">${picks.filter((a) => a.x.market === x.id).length}</span></button>`).join('')}</div>
+    <div class="card section record"><h3>${esc(mk.name)} · picks</h3>
+      <p class="small">On this device: ${done.length ? `<b>${won} of ${done.length}</b> correct (${Math.round((won / done.length) * 100)}%)` : 'no settled picks yet'}${recs.length - done.length ? ` · ${recs.length - done.length} awaiting a result` : ''}. <a href="#/results">Check results</a></p>
+      <p class="small muted">Experimental: picks need the model at ${pct(TENNIS_RULES.minProb)}+, and both players ranked. Unlike football there are no independent cross-checks and no backtest yet, so treat the first weeks of results as the test.</p></div>
+    ${shown.length ? shown.map(pickCard).join('') : `<div class="empty muted">${!state.tennisAt && !all.length ? 'Loading ATP and WTA matches…' : `No ${esc(mk.name.toLowerCase())} picks right now.`}</div>`}
+    <details class="howto"><summary>How tennis predictions work</summary>
+      <ol>
+        <li>Each player's world ranking gives a pre-match win chance over best of 3: 1 ÷ (1 + (rank A ÷ rank B)<sup>0.5</sup>). For example #3 vs #41 → 79%.</li>
+        <li>That chance is turned into how often each player wins a point on serve (around 64% on the ATP tour, 56% on the WTA tour, plus or minus the gap).</li>
+        <li>A point → game → set → match model (tiebreak at 6–6) then gives every market: the winner, whether the underdog takes a set, the number of sets and the number of games (a tiebreak counts as one game). Best of 5 is used for men's Grand Slam singles.</li>
+        <li>Live, the model restarts from the current set and game score, so a player a set and a break up is rated accordingly.</li>
+      </ol>
+      <p class="small muted">Not used, because the free feed doesn't provide them: serve/return statistics, surface form, fatigue, injuries, head-to-head. Retirements and walkovers are void.</p>
+    </details>
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-ttab="${k}" aria-selected="${state.tennisTab === k}">${l}<span class="count">${cnt(k)}</span></button>`).join('')}</div>
+    ${list.length ? list.map(tennisCard).join('') : `<div class="empty muted">${state.tennisAt || state.tennisDemo ? 'No singles matches in the ATP/WTA feed for this filter.' : 'Loading…'}</div>`}
+    <p class="disclaimer">Statistical estimates only — not betting advice.</p>`;
+}
+
+// ---- Results page: every recorded pick, checked against the final result ----
+const marketName = (x) => (x.sport === 'tennis' ? TENNIS_MARKETS.find((t) => t.id === x.market)?.name : marketById(x.market)?.name) || x.market;
+const RESULT_BADGE = { won: ['won', '✓ Won'], lost: ['lost', '✗ Lost'], void: ['void', 'Void'], unknown: ['void', 'No result'] };
+
+async function checkResults(force = false) {
+  if (state.checking) return;
+  const now = Date.now();
+  const due = loadRecords().filter((x) => !x.result && x.league !== 'demo' && (x.source || 'espn') === 'espn'
+    && now - new Date(x.kickoff || x.at).getTime() > (x.sport === 'tennis' ? 1 : 2) * 3_600_000
+    && (force || !x.checkedAt || now - x.checkedAt > 15 * 60_000));
+  if (!due.length) { if (force) { state.checkMsg = 'Nothing to check: every pick whose match should be over has a result.'; renderResults(); } return; }
+  state.checking = true; state.checkMsg = `Checking ${due.length} result${due.length > 1 ? 's' : ''}…`;
+  if (route().name === 'results') renderResults();
+  let settled = 0, failed = 0;
+  const football = [...new Map(due.filter((x) => x.sport !== 'tennis').map((x) => [`${x.league}/${x.eventId || x.id.split('/')[1]}`, x])).keys()].slice(0, 30);
+  const tennisDays = [...new Set(due.filter((x) => x.sport === 'tennis').map((x) => `${x.league}|${(x.kickoff || '').slice(0, 10)}`))].slice(0, 10);
+  const patches = new Map(); // record id -> patch
+  await Promise.all(football.map(async (k) => {
+    const [league, id] = k.split('/');
+    try {
+      const r = await fetchResult(league, id, { proxy: settings.proxy });
+      for (const x of due.filter((y) => y.sport !== 'tennis' && y.id.startsWith(`${league}/${id}/`))) {
+        if (r?.state === 'post') { patches.set(x.id, { ...settleFootball(x, r), settledAt: Date.now() }); settled++; } else patches.set(x.id, { checkedAt: Date.now() });
+      }
+    } catch { failed++; }
+  }));
+  await Promise.all(tennisDays.map(async (k) => {
+    const [tour, day] = k.split('|');
+    try {
+      const ms = await fetchTennisDay(tour, day ? `${day}T12:00:00Z` : new Date().toISOString(), { proxy: settings.proxy });
+      for (const x of due.filter((y) => y.sport === 'tennis' && y.league === tour)) {
+        const m = ms.find((mm) => mm.id === x.eventId);
+        const r = m && settleTennisMarket(x, m);
+        if (r) { patches.set(x.id, { ...r, settledAt: Date.now() }); settled++; } else if (m) patches.set(x.id, { checkedAt: Date.now() });
+      }
+    } catch { failed++; }
+  }));
+  updateRecords((x) => patches.get(x.id) || null);
+  state.checking = false;
+  state.checkMsg = `Checked just now: ${settled} newly settled${failed ? ` · ${failed} couldn't be reached (try again later)` : ''}.`;
+  if (route().name === 'results') renderResults();
+}
+
+function resultsAction(act) {
+  if (act === 'check') { checkResults(true); return; }
+  if (act === 'csv') {
+    const blob = new Blob([toCSV(loadRecords())], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `goalscope-results-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    return;
+  }
+  if (act === 'clear' && confirm('Delete every recorded pick and result on this device?')) { saveRecords([]); renderResults(); }
+}
+
+function explainResult(x) {
+  if (x.result === 'void') return x.note ? `Void: ${x.note}` : 'Void';
+  if (x.result === 'unknown') return x.note ? `Couldn't settle: ${x.note}` : 'Couldn\'t settle';
+  if (!x.result) return new Date(x.kickoff || x.at) > new Date() ? 'Not started yet' : 'Waiting for the final result';
+  if (x.sport === 'tennis') return `Final ${x.final} in sets (${x.sets}) · ${x.totalGames} games`;
+  const mk = marketById(x.market);
+  const tot = x.final ? x.final.split('-').reduce((s, v) => s + +v, 0) : null;
+  const bits = [`Full time ${x.final}${x.aet ? ' (after extra time; 1X2 settles as a draw)' : ''}`];
+  if (x.ht) bits.push(`half time ${x.ht}`);
+  if (mk?.id === '1x2' && x.winner) bits.push(`result: ${x.winner}`);
+  else if (mk && !mk.sides && tot != null) bits.push(`${mk.rule}`);
+  return bits.join(' · ');
+}
+
+function renderResults() {
+  const all = loadRecords().slice().sort((a, b) => new Date(b.kickoff || b.at) - new Date(a.kickoff || a.at));
+  const f = state.res;
+  const bySport = all.filter((x) => f.sport === 'all' || (x.sport || 'football') === f.sport);
+  const marketsHere = [...new Set(bySport.map((x) => `${x.sport || 'football'}|${x.market}`))];
+  const isStatus = (x) => f.status === 'all' || (f.status === 'pending' ? !x.result : f.status === 'other' ? ['void', 'unknown'].includes(x.result) : x.result === f.status);
+  const list = bySport.filter((x) => (f.market === 'all' || `${x.sport || 'football'}|${x.market}` === f.market) && isStatus(x));
+  const sum = summarize(bySport);
+  const tot = sum.reduce((s, g) => ({ settled: s.settled + g.settled, won: s.won + g.won, pending: s.pending + g.pending, sumP: s.sumP + g.sumP }), { settled: 0, won: 0, pending: 0, sumP: 0 });
+  const chip = (k, v, l) => `<button class="chip" data-res="${k}:${esc(v)}" aria-pressed="${f[k] === v}">${esc(l)}</button>`;
+  const rows = sum.sort((a, b) => b.picks - a.picks).map((g) => `<tr>
+      <td>${g.sport === 'tennis' ? '🎾' : '⚽'} ${esc(marketName(g))}</td><td class="num">${g.picks}</td>
+      <td class="num">${g.settled ? `${g.won}/${g.settled}` : '–'}</td>
+      <td class="num"><b>${g.hitRate == null ? '–' : pct(g.hitRate)}</b></td><td class="num muted">${g.claimed == null ? '–' : pct(g.claimed)}</td>
+      <td class="num muted">${g.pending || ''}</td></tr>`).join('');
+  let body = '', lastDay = '';
+  for (const x of list.slice(0, 300)) {
+    const day = new Date(x.kickoff || x.at).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+    if (day !== lastDay) { body += `<div class="fx-day">${esc(day)}</div>`; lastDay = day; }
+    const [cls, txt] = RESULT_BADGE[x.result] || ['pending', '⏳ Pending'];
+    const label = x.label || (x.sport === 'tennis' ? x.side : sideLabel(marketById(x.market) || { yes: 'Yes', no: 'No' }, x.side, { home: { short: x.home || 'Home' }, away: { short: x.away || 'Away' } }));
+    const when = x.minute != null ? `at ${x.minute}' (${x.score})` : x.score && x.sport === 'tennis' ? `during play (${x.score})` : 'before kick-off';
+    const link = x.sport !== 'tennis' && x.result == null ? `#/m/${encodeURIComponent(x.league)}/${encodeURIComponent(x.eventId || x.id.split('/')[1])}` : null;
+    body += `<div class="card res-row ${cls}">
+      <div class="pick-top"><span class="lg-line">${x.sport === 'tennis' ? '🎾' : '⚽'} ${esc(x.leagueName || '')}</span><span class="badge res-${cls}">${txt}</span></div>
+      <div class="pick-teams">${link ? `<a href="${link}">${esc(x.match)}</a>` : esc(x.match)}</div>
+      <div class="pick-main"><span class="pick-label yes">${esc(label)}</span><span class="pick-p">${pct(x.p)}</span><span class="muted small">${esc(marketName(x))} · picked ${esc(when)}</span></div>
+      <div class="small ${x.result === 'won' ? 'good' : x.result === 'lost' ? 'bad' : 'muted'}">${esc(explainResult(x))}</div>
+      ${x.checks?.length ? `<div class="checks">${x.checks.map((c) => `<span class="chk">✓ ${esc(c)}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }
+  view.innerHTML = `${nav('results')}
+    <h2 class="page-title">Results</h2>
+    <p class="muted small">Every pick shown on the Markets and Tennis pages is saved on this device the first time it appears, with the chance the model gave it, then checked against the final score once the match is over. Use this page to cross-check the predictions.</p>
+    <div class="card section record">
+      <h3>Track record${f.sport !== 'all' ? ` · ${f.sport}` : ''}</h3>
+      <p>${tot.settled ? `<b>${tot.won} of ${tot.settled}</b> picks correct (<b>${pct(tot.won / tot.settled)}</b>); the model claimed ${pct(tot.sumP / tot.settled)} on average.` : 'No settled picks yet.'}${tot.pending ? ` ${tot.pending} awaiting a result.` : ''}</p>
+      ${rows ? `<table class="mk-table res-sum"><thead><tr><th>Market</th><th>Picks</th><th>Won</th><th>Hit rate</th><th>Claimed</th><th>Pending</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="muted small">If the hit rate keeps falling well below the claimed chance, that market's predictions are too confident.</p>` : ''}
+      <div class="src-actions">
+        <button class="btn" data-resact="check" type="button" ${state.checking ? 'disabled' : ''}>⟳ Check results now</button>
+        <button class="btn" data-resact="csv" type="button" ${all.length ? '' : 'disabled'}>Export CSV</button>
+        ${all.length ? '<button class="btn" data-resact="clear" type="button">Clear history</button>' : ''}
+      </div>
+      ${state.checkMsg ? `<p class="small muted">${esc(state.checkMsg)}</p>` : ''}
+    </div>
+    <div class="chips">${chip('sport', 'all', 'All sports')}${chip('sport', 'football', '⚽ Football')}${chip('sport', 'tennis', '🎾 Tennis')}</div>
+    <div class="chips">${chip('status', 'all', 'All')}${chip('status', 'pending', 'Pending')}${chip('status', 'won', 'Won')}${chip('status', 'lost', 'Lost')}${chip('status', 'other', 'Void / no result')}</div>
+    ${marketsHere.length > 1 ? `<div class="chips">${chip('market', 'all', 'All markets')}${marketsHere.map((k) => { const [sp, id] = k.split('|'); return chip('market', k, marketName({ sport: sp, market: id })); }).join('')}</div>` : ''}
+    ${body || `<div class="empty muted">${all.length ? 'No picks match these filters.' : 'No picks recorded yet. Open <a href="#/markets">Markets</a> or <a href="#/tennis">Tennis</a>: every validated pick shown there is saved here and checked after the match.'}</div>`}
+    ${list.length > 300 ? '<p class="muted small">Showing the latest 300. Export CSV for everything.</p>' : ''}
+    <p class="disclaimer">Results are fetched from the free ESPN feed. Statistical estimates only — not betting advice.</p>`;
 }
 
 // ---- Match view ----
@@ -647,6 +909,8 @@ function matchHTML(m, d, err) {
         <div class="kpi"><b>${p.expectedFinalTotal.toFixed(1)}</b><span>expected final total</span></div>
         <div class="kpi"><b>${p.expectedMoreHome.toFixed(2)} · ${p.expectedMoreAway.toFixed(2)}</b><span>${H} · ${A} xG ${live ? 'remaining' : ''}</span></div>
         <div class="kpi"><b>${pct(p.over25)} · ${pct(p.btts)}</b><span>Over 2.5 · both score</span></div>
+        ${p.firstHalf.decided ? (p.firstHalf.expected != null ? `<div class="kpi"><b>${p.firstHalf.expected}</b><span>goals in the first half</span></div>` : '')
+          : `<div class="kpi"><b>${pct(p.firstHalf.over05)} · ${pct(p.firstHalf.over15)}</b><span>1st half Over 0.5 · Over 1.5 (${p.firstHalf.expected.toFixed(1)} expected)</span></div>`}
       </div>
     </section>
     <section class="card section">
@@ -727,7 +991,7 @@ function matchHTML(m, d, err) {
   return `<a class="back" href="#/">‹ All matches</a>
     ${scoreboard(m)}
     ${err ? `<div class="banner" style="margin-top:12px">Detailed stats unavailable (${esc(err)}). Showing an estimate from the score and clock only.</div>` : ''}
-    ${verdict}${how}${statsRunner}${form}${h2hSec}${lineups}
+    ${verdict}${marketsPanel(m, d)}${how}${statsRunner}${form}${h2hSec}${lineups}
     <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
 }
 
@@ -817,6 +1081,8 @@ async function refresh(full = true, force = false) {
   const r = route();
   if (r.name === 'list') { renderList(); warm(); }
   else if (r.name === 'markets') { renderMarkets(); warm(); loadUpcoming(); }
+  else if (r.name === 'tennis') { loadTennis(); renderTennis(); }
+  else if (r.name === 'results') { renderResults(); checkResults(); }
   else if (r.name === 'match') renderMatch(r, !full);
 }
 function schedule() {
@@ -824,7 +1090,7 @@ function schedule() {
   if (settings.refresh > 0) timer = setInterval(() => { if (!document.hidden) refresh(false); }, settings.refresh * 1000);
 }
 
-$('#refresh').addEventListener('click', () => { state.details.clear(); refresh(false, true); });
+$('#refresh').addEventListener('click', () => { state.details.clear(); state.tennisAt = 0; refresh(false, true); });
 window.addEventListener('hashchange', render);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.updated && Date.now() - state.updated > 20_000) refresh(false); });
 
@@ -848,6 +1114,7 @@ dlg.addEventListener('close', () => {
   store.set('demo', settings.demo); store.set('proxy', settings.proxy); store.set('refresh', settings.refresh);
   state.details.clear();
   state.matches = [];
+  state.tennis = []; state.tennisAt = 0; state.tennisDemo = false;
   schedule();
   refresh();
 });

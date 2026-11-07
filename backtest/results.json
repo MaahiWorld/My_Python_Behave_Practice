@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-06T17:19:48.346Z",
+  "generated": "2026-11-07T17:39:56.541Z",
   "leagues": [
     "at.1",
     "be.1",
@@ -24,7 +24,8 @@
       "strengthPower": 0.6,
       "firstHalfShare": 0.445,
       "scoreTrail": 0.2,
-      "scoreLead": 0.06
+      "scoreLead": 0.06,
+      "resultSharpen": 1.7
     },
     "rules": {
       "minProb": 0.8,
@@ -39,9 +40,9 @@
       "logLoss": 0.5775
     },
     "picks": {
-      "total": 1601,
-      "won": 1363,
-      "hitRate": 85.1,
+      "total": 1957,
+      "won": 1654,
+      "hitRate": 84.5,
       "byMarket": {
         "o15": {
           "name": "Over 1.5 goals",
@@ -71,6 +72,40 @@
           "hitRate": null,
           "avgPredicted": 0,
           "bySide": {}
+        },
+        "1x2": {
+          "name": "Full-time result",
+          "picks": 109,
+          "won": 90,
+          "hitRate": 82.6,
+          "avgPredicted": 74.6,
+          "bySide": {
+            "home": {
+              "n": 109,
+              "won": 90
+            }
+          }
+        },
+        "h1o05": {
+          "name": "1st half: Over 0.5 goals",
+          "picks": 247,
+          "won": 201,
+          "hitRate": 81.4,
+          "avgPredicted": 79.6,
+          "bySide": {
+            "1st half Over 0.5": {
+              "n": 247,
+              "won": 201
+            }
+          }
+        },
+        "h1o15": {
+          "name": "1st half: Over 1.5 goals",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
         }
       }
     },
@@ -78,9 +113,9 @@
       "o15": {
         "n": 5991,
         "accuracy": 79.1,
-        "brier": 0.164,
+        "brier": 0.328,
         "baseline": 79.1,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -117,9 +152,9 @@
       "o25": {
         "n": 5991,
         "accuracy": 56.2,
-        "brier": 0.244,
+        "brier": 0.488,
         "baseline": 54.6,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -144,9 +179,9 @@
       "btts": {
         "n": 5991,
         "accuracy": 56.3,
-        "brier": 0.245,
+        "brier": 0.49,
         "baseline": 56.4,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -165,6 +200,105 @@
             "n": 37,
             "predicted": 72.1,
             "actual": 59.5
+          }
+        ]
+      },
+      "1x2": {
+        "n": 5991,
+        "accuracy": 51.2,
+        "brier": 0.602,
+        "baseline": 44.8,
+        "baselineSide": "always home",
+        "calibration": [
+          {
+            "range": "33-50%",
+            "n": 3365,
+            "predicted": 43.6,
+            "actual": 43.6
+          },
+          {
+            "range": "50-60%",
+            "n": 1791,
+            "predicted": 54.3,
+            "actual": 56.1
+          },
+          {
+            "range": "60-70%",
+            "n": 668,
+            "predicted": 64.1,
+            "actual": 68.6
+          },
+          {
+            "range": "70-80%",
+            "n": 158,
+            "predicted": 73.3,
+            "actual": 86.1
+          },
+          {
+            "range": "80-90%",
+            "n": 9,
+            "predicted": 81.4,
+            "actual": 44.4
+          }
+        ]
+      },
+      "h1o05": {
+        "n": 5772,
+        "accuracy": 76.5,
+        "brier": 0.362,
+        "baseline": 76.5,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 5,
+            "predicted": 59.4,
+            "actual": 40
+          },
+          {
+            "range": "60-70%",
+            "n": 1994,
+            "predicted": 67.5,
+            "actual": 72
+          },
+          {
+            "range": "70-80%",
+            "n": 3707,
+            "predicted": 73.4,
+            "actual": 78.6
+          },
+          {
+            "range": "80-90%",
+            "n": 66,
+            "predicted": 81.5,
+            "actual": 92.4
+          }
+        ]
+      },
+      "h1o15": {
+        "n": 5772,
+        "accuracy": 63.2,
+        "brier": 0.461,
+        "baseline": 63,
+        "baselineSide": "always no",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 1119,
+            "predicted": 57.1,
+            "actual": 57.6
+          },
+          {
+            "range": "60-70%",
+            "n": 4068,
+            "predicted": 64.9,
+            "actual": 63.5
+          },
+          {
+            "range": "70-80%",
+            "n": 585,
+            "predicted": 71.8,
+            "actual": 71.3
           }
         ]
       }
@@ -234,9 +368,9 @@
       "logLoss": 0.5856
     },
     "picks": {
-      "total": 3653,
-      "won": 2956,
-      "hitRate": 80.9,
+      "total": 6327,
+      "won": 4902,
+      "hitRate": 77.5,
       "byMarket": {
         "o15": {
           "name": "Over 1.5 goals",
@@ -284,6 +418,49 @@
               "won": 12
             }
           }
+        },
+        "1x2": {
+          "name": "Full-time result",
+          "picks": 1306,
+          "won": 876,
+          "hitRate": 67.1,
+          "avgPredicted": 81.6,
+          "bySide": {
+            "home": {
+              "n": 900,
+              "won": 616
+            },
+            "away": {
+              "n": 406,
+              "won": 260
+            }
+          }
+        },
+        "h1o05": {
+          "name": "1st half: Over 0.5 goals",
+          "picks": 906,
+          "won": 735,
+          "hitRate": 81.1,
+          "avgPredicted": 81,
+          "bySide": {
+            "1st half Over 0.5": {
+              "n": 906,
+              "won": 735
+            }
+          }
+        },
+        "h1o15": {
+          "name": "1st half: Over 1.5 goals",
+          "picks": 462,
+          "won": 335,
+          "hitRate": 72.5,
+          "avgPredicted": 78.1,
+          "bySide": {
+            "1st half Under 1.5": {
+              "n": 462,
+              "won": 335
+            }
+          }
         }
       }
     },
@@ -291,9 +468,9 @@
       "o15": {
         "n": 5991,
         "accuracy": 78.9,
-        "brier": 0.167,
+        "brier": 0.334,
         "baseline": 79.1,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -330,9 +507,9 @@
       "o25": {
         "n": 5991,
         "accuracy": 55.5,
-        "brier": 0.248,
+        "brier": 0.496,
         "baseline": 54.6,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -369,9 +546,9 @@
       "btts": {
         "n": 5991,
         "accuracy": 53.5,
-        "brier": 0.25,
+        "brier": 0.499,
         "baseline": 56.4,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -396,6 +573,123 @@
             "n": 1,
             "predicted": 80.1,
             "actual": 100
+          }
+        ]
+      },
+      "1x2": {
+        "n": 5991,
+        "accuracy": 51,
+        "brier": 0.617,
+        "baseline": 44.8,
+        "baselineSide": "always home",
+        "calibration": [
+          {
+            "range": "33-50%",
+            "n": 1850,
+            "predicted": 43.1,
+            "actual": 40.1
+          },
+          {
+            "range": "50-60%",
+            "n": 1313,
+            "predicted": 54.9,
+            "actual": 45.3
+          },
+          {
+            "range": "60-70%",
+            "n": 1069,
+            "predicted": 64.9,
+            "actual": 52.4
+          },
+          {
+            "range": "70-80%",
+            "n": 935,
+            "predicted": 74.7,
+            "actual": 59.3
+          },
+          {
+            "range": "80-90%",
+            "n": 611,
+            "predicted": 84.7,
+            "actual": 70.5
+          },
+          {
+            "range": "90-100%",
+            "n": 213,
+            "predicted": 93.1,
+            "actual": 80.8
+          }
+        ]
+      },
+      "h1o05": {
+        "n": 5772,
+        "accuracy": 76.5,
+        "brier": 0.365,
+        "baseline": 76.5,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 286,
+            "predicted": 56.9,
+            "actual": 66.4
+          },
+          {
+            "range": "60-70%",
+            "n": 2062,
+            "predicted": 66.1,
+            "actual": 74.2
+          },
+          {
+            "range": "70-80%",
+            "n": 2907,
+            "predicted": 74.4,
+            "actual": 78.2
+          },
+          {
+            "range": "80-90%",
+            "n": 511,
+            "predicted": 82.5,
+            "actual": 80.8
+          },
+          {
+            "range": "90-100%",
+            "n": 6,
+            "predicted": 90.9,
+            "actual": 100
+          }
+        ]
+      },
+      "h1o15": {
+        "n": 5772,
+        "accuracy": 62.8,
+        "brier": 0.464,
+        "baseline": 63,
+        "baselineSide": "always no",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 1788,
+            "predicted": 55.5,
+            "actual": 57.3
+          },
+          {
+            "range": "60-70%",
+            "n": 2617,
+            "predicted": 65,
+            "actual": 62.4
+          },
+          {
+            "range": "70-80%",
+            "n": 1272,
+            "predicted": 73.6,
+            "actual": 70.2
+          },
+          {
+            "range": "80-90%",
+            "n": 95,
+            "predicted": 82.3,
+            "actual": 76.8
           }
         ]
       }
@@ -471,9 +765,9 @@
       "logLoss": 0.5889
     },
     "picks": {
-      "total": 3802,
-      "won": 3144,
-      "hitRate": 82.7,
+      "total": 4648,
+      "won": 3840,
+      "hitRate": 82.6,
       "byMarket": {
         "o15": {
           "name": "Over 1.5 goals",
@@ -503,6 +797,40 @@
           "hitRate": null,
           "avgPredicted": 0,
           "bySide": {}
+        },
+        "1x2": {
+          "name": "Full-time result",
+          "picks": 303,
+          "won": 252,
+          "hitRate": 83.2,
+          "avgPredicted": 74.4,
+          "bySide": {
+            "home": {
+              "n": 303,
+              "won": 252
+            }
+          }
+        },
+        "h1o05": {
+          "name": "1st half: Over 0.5 goals",
+          "picks": 543,
+          "won": 444,
+          "hitRate": 81.8,
+          "avgPredicted": 79.3,
+          "bySide": {
+            "1st half Over 0.5": {
+              "n": 543,
+              "won": 444
+            }
+          }
+        },
+        "h1o15": {
+          "name": "1st half: Over 1.5 goals",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
         }
       }
     },
@@ -510,9 +838,9 @@
       "o15": {
         "n": 14943,
         "accuracy": 76.4,
-        "brier": 0.178,
+        "brier": 0.356,
         "baseline": 76.4,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -549,9 +877,9 @@
       "o25": {
         "n": 14943,
         "accuracy": 56.1,
-        "brier": 0.245,
+        "brier": 0.491,
         "baseline": 52.4,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -576,9 +904,9 @@
       "btts": {
         "n": 14943,
         "accuracy": 54.1,
-        "brier": 0.248,
+        "brier": 0.497,
         "baseline": 53.3,
-        "baselineSide": "always Yes/Over",
+        "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
@@ -597,6 +925,105 @@
             "n": 54,
             "predicted": 71.4,
             "actual": 55.6
+          }
+        ]
+      },
+      "1x2": {
+        "n": 14943,
+        "accuracy": 49.6,
+        "brier": 0.61,
+        "baseline": 43.1,
+        "baselineSide": "always home",
+        "calibration": [
+          {
+            "range": "33-50%",
+            "n": 8450,
+            "predicted": 43.3,
+            "actual": 42.1
+          },
+          {
+            "range": "50-60%",
+            "n": 4392,
+            "predicted": 54.4,
+            "actual": 53.9
+          },
+          {
+            "range": "60-70%",
+            "n": 1675,
+            "predicted": 64,
+            "actual": 67.3
+          },
+          {
+            "range": "70-80%",
+            "n": 405,
+            "predicted": 73.6,
+            "actual": 81.5
+          },
+          {
+            "range": "80-90%",
+            "n": 21,
+            "predicted": 82.1,
+            "actual": 95.2
+          }
+        ]
+      },
+      "h1o05": {
+        "n": 13950,
+        "accuracy": 75.8,
+        "brier": 0.372,
+        "baseline": 75.8,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 113,
+            "predicted": 58.8,
+            "actual": 76.1
+          },
+          {
+            "range": "60-70%",
+            "n": 6109,
+            "predicted": 66.8,
+            "actual": 73.8
+          },
+          {
+            "range": "70-80%",
+            "n": 7612,
+            "predicted": 73.7,
+            "actual": 77.4
+          },
+          {
+            "range": "80-90%",
+            "n": 116,
+            "predicted": 81.1,
+            "actual": 79.3
+          }
+        ]
+      },
+      "h1o15": {
+        "n": 13950,
+        "accuracy": 62.6,
+        "brier": 0.467,
+        "baseline": 62.6,
+        "baselineSide": "always no",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 2508,
+            "predicted": 57,
+            "actual": 57.6
+          },
+          {
+            "range": "60-70%",
+            "n": 8731,
+            "predicted": 65.2,
+            "actual": 62.8
+          },
+          {
+            "range": "70-80%",
+            "n": 2711,
+            "predicted": 72.4,
+            "actual": 66.9
           }
         ]
       }

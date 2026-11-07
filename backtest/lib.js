@@ -3,7 +3,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { predict } from '../js/model.js';
-import { marketPicks, MARKETS, outcome } from '../js/markets.js';
+import { marketPicks, MARKETS, sidesOf, bestSide } from '../js/markets.js';
+
+// Result of a finished match in the shape the markets settle on.
+export const resultOf = (m) => ({ hs: m.ft[0], as: m.ft[1], ht: m.ht ? { home: m.ht[0], away: m.ht[1] } : null, aet: false });
 
 export const TRAIN_SEASONS = ['2019-20', '2020-21', '2021-22', '2022-23', '2023-24'];
 
@@ -77,51 +80,57 @@ export function predictAll(contexts, { seasons, withPicks = false } = {}) {
 
 // Mean log loss over the goal markets (pre-match) and "another goal after half time" — lower is better.
 export function logLoss(rows) {
-  const eps = 1e-6, ll = (p, y) => -Math.log(Math.min(1 - eps, Math.max(eps, y ? p : 1 - p)));
+  const eps = 1e-6, ll = (p) => -Math.log(Math.min(1 - eps, Math.max(eps, p)));
   let sum = 0, n = 0;
   for (const r of rows) {
     if (r.pre.confidence.level !== 'High') continue;
-    const [hs, as] = r.m.ft;
-    for (const mk of MARKETS) { sum += ll(r.pre[mk.key], outcome(mk, hs, as)); n++; }
-    if (r.half) { sum += ll(r.half.pMoreGoal, hs + as - r.m.ht[0] - r.m.ht[1] > 0); n++; }
+    const res = resultOf(r.m);
+    for (const mk of MARKETS) {
+      if (mk.id === '1x2' || mk.id.startsWith('h1')) continue; // tuning target kept as originally defined
+      sum += ll(mk.probs(r.pre)[mk.settle(res)]); n++;
+    }
+    if (r.half) { sum += ll(hs(r) ? r.half.pMoreGoal : 1 - r.half.pMoreGoal); n++; }
   }
   return sum / n;
 }
+const hs = (r) => r.m.ft[0] + r.m.ft[1] - r.m.ht[0] - r.m.ht[1] > 0;
 
 export function score(rows) {
   const pct = (x) => Math.round(x * 1000) / 10;
   const total = (r) => r.m.ft[0] + r.m.ft[1];
   const high = rows.filter((r) => r.pre.confidence.level === 'High');
 
-  function marketStats(list, key, mk) {
+  function marketStats(list, mk) {
+    list = list.filter((r) => mk.settle(resultOf(r.m)) != null);
     let correct = 0, brier = 0;
-    const buckets = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8], [0.8, 0.9], [0.9, 1.01]].map(([lo, hi]) => ({ lo, hi, n: 0, sumP: 0, hits: 0 }));
+    const buckets = [[0.33, 0.5], [0.5, 0.6], [0.6, 0.7], [0.7, 0.8], [0.8, 0.9], [0.9, 1.01]].map(([lo, hi]) => ({ lo, hi, n: 0, sumP: 0, hits: 0 }));
+    const sideCount = {};
     for (const r of list) {
-      const p = r.pre[key];
-      const yes = outcome(mk, r.m.ft[0], r.m.ft[1]);
-      const callYes = p >= 0.5;
-      if (callYes === yes) correct++;
-      brier += (p - (yes ? 1 : 0)) ** 2;
-      const conf = callYes ? p : 1 - p;
-      const b = buckets.find((x) => conf >= x.lo && conf < x.hi);
-      b.n++; b.sumP += conf; b.hits += callYes === yes ? 1 : 0;
+      const won = mk.settle(resultOf(r.m));
+      sideCount[won] = (sideCount[won] || 0) + 1;
+      const best = bestSide(mk, r.pre);
+      if (best.side === won) correct++;
+      for (const sd of sidesOf(mk)) brier += (best.probs[sd] - (sd === won ? 1 : 0)) ** 2;
+      const b = buckets.find((x) => best.p >= x.lo && best.p < x.hi);
+      if (b) { b.n++; b.sumP += best.p; b.hits += best.side === won ? 1 : 0; }
     }
-    const yesRate = list.filter((r) => outcome(mk, r.m.ft[0], r.m.ft[1])).length / list.length;
+    const [commonSide, commonN] = Object.entries(sideCount).sort((a, b) => b[1] - a[1])[0] || ['-', 0];
     return {
       n: list.length, accuracy: pct(correct / list.length), brier: Math.round((brier / list.length) * 1000) / 1000,
-      baseline: pct(Math.max(yesRate, 1 - yesRate)), baselineSide: yesRate >= 0.5 ? 'always Yes/Over' : 'always No/Under',
+      baseline: pct(commonN / list.length), baselineSide: `always ${commonSide}`,
       calibration: buckets.filter((b) => b.n).map((b) => ({ range: `${Math.round(b.lo * 100)}-${Math.min(100, Math.round(b.hi * 100))}%`, n: b.n, predicted: pct(b.sumP / b.n), actual: pct(b.hits / b.n) })),
     };
-}
+  }
 
   const allPicks = rows.flatMap((r) => r.picks.map((pk) => ({ r, pk })));
   const pickStats = Object.fromEntries(MARKETS.map((mk) => {
-    const xs = allPicks.filter((x) => x.pk.market.id === mk.id);
-    const won = xs.filter(({ r, pk }) => (pk.side === 'yes') === outcome(mk, r.m.ft[0], r.m.ft[1])).length;
+    const xs = allPicks.filter((x) => x.pk.market.id === mk.id && mk.settle(resultOf(x.r.m)) != null);
+    const hit = ({ r, pk }) => mk.settle(resultOf(r.m)) === pk.side;
+    const won = xs.filter(hit).length;
     const bySide = {};
-    for (const side of ['yes', 'no']) {
-      const s = xs.filter((x) => x.pk.side === side);
-      if (s.length) bySide[side === 'yes' ? mk.yes : mk.no] = { n: s.length, won: s.filter(({ r }) => (side === 'yes') === outcome(mk, r.m.ft[0], r.m.ft[1])).length };
+    for (const side of sidesOf(mk)) {
+      const sx = xs.filter((x) => x.pk.side === side);
+      if (sx.length) bySide[mk.label ? side : side === 'yes' ? mk.yes : mk.no] = { n: sx.length, won: sx.filter(hit).length };
     }
     const avgP = xs.length ? xs.reduce((s, x) => s + x.pk.p, 0) / xs.length : 0;
     return [mk.id, { name: mk.name, picks: xs.length, won, hitRate: xs.length ? pct(won / xs.length) : null, avgPredicted: pct(avgP), bySide }];
@@ -166,7 +175,7 @@ export function score(rows) {
   return {
     data: { matches: rows.length, seasons: `${seasons[0]} to ${seasons.at(-1)}`, highConfidence: high.length, logLoss: Math.round(logLoss(rows) * 10000) / 10000 },
     picks: { total: pickTotal.n, won: pickTotal.won, hitRate: pickTotal.n ? pct(pickTotal.won / pickTotal.n) : null, byMarket: pickStats },
-    highConfidenceMarkets: Object.fromEntries(MARKETS.map((mk) => [mk.id, marketStats(high, mk.key, mk)])),
+    highConfidenceMarkets: Object.fromEntries(MARKETS.map((mk) => [mk.id, marketStats(high, mk)])),
     goals: { meanPredicted: Math.round(meanPred * 100) / 100, meanActual: Math.round(meanAct * 100) / 100, mae: Math.round(mae * 100) / 100, naiveMae: Math.round(naiveMae * 100) / 100, exactTotal: pct(exactTotal), scope },
     halfTime: ht,
   };

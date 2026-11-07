@@ -34,23 +34,44 @@ on 2024-25 to 2026-27 (unseen): validated Goal-market picks were correct **85 ti
 (1,363 of 1,601, all Over 1.5, against a natural Over 1.5 rate of 79 in 100). Full results, including
 where the model adds little, in [backtest/RESULTS.md](backtest/RESULTS.md).
 
-## Goal markets page
+## Markets page
 
-The **Goal markets** page lists Over 1.5, Over 2.5 and Both-teams-to-score picks (and their
-Under/No sides) for live matches, matches starting today, and the next 7 days of fixtures in about
+The **Markets** page lists picks for six football markets: Over 1.5, Over 2.5, Both teams to score
+(and their Under/No sides), **Full-time result (1X2)** (settled on the 90-minute score), and
+**1st half Over 0.5 / Over 1.5 goals**, for live matches, matches starting today, and the next 7 days of fixtures in about
 30 of the best-known competitions (top European leagues, UEFA competitions, major cups, MLS, Liga MX,
 Brazil, Argentina, Saudi Pro League, internationals). An **Upcoming fixtures** section shows every
 high-confidence fixture with its Over 1.5 / Over 2.5 / BTTS chances, grouped by day. A pick appears only when:
 
 1. the match prediction is high confidence;
-2. the model gives it at least 80%;
-3. independent cross-checks all agree at 70%+: the season record alone, recent form alone, the
+2. the model gives it at least 80% (1X2: 70%; 1st half Over 0.5: 78%, set on the backtest's training seasons);
+3. independent cross-checks all agree at 70%+ (1X2: 60%+): the season record alone, recent form alone, the
    prediction without live match stats, and head-to-head history (4+ meetings, before kick-off),
    with at least two checks required;
-4. the market isn't already decided.
+4. the market isn't already decided (first-half markets close at half time).
 
-Every pick shown is stored on the device and marked won or lost at full time, so each market builds
-its own track record (`js/markets.js`).
+Backtested on unseen seasons: 1X2 picks 82.6% correct (90 of 109), 1st half Over 0.5 picks 81.4%
+(201 of 247). Each match page also has a **Markets for this match** panel with the most likely side of
+every market and why it is or isn't a pick.
+
+## Tennis page (experimental)
+
+ATP and WTA singles from the free ESPN feed, with four markets: **match winner**, **underdog to win at
+least one set** (or favourite in straight sets), **total sets** (Over/Under 2.5, or 3.5 in best of 5)
+and **total games**. Each player's world ranking gives a pre-match chance (1 ÷ (1 + (rank A ÷ rank
+B)^0.5) over best of 3), which is turned into serve-point strengths for a point → game → set → match
+model; live, the model restarts from the current set and game score (`js/tennis.js`). A pick needs
+75%+ and both players ranked (top 400). There are no cross-checks and **no backtest yet** (no free
+historical tennis data was reachable), so the Results page is where tennis earns its track record.
+
+## Results page
+
+Every pick shown on the Markets and Tennis pages is saved on the device the first time it appears
+(chance claimed, minute and score when picked, cross-checks), then checked after the match: matches
+still in the feed settle automatically, and **Check results now** fetches final scores from ESPN for
+anything older (`js/records.js`). The page shows hit rate vs. the chance the model claimed for each
+market, filters (sport, won/lost/pending, market), the full-time / half-time score or set scores
+behind each result, and a CSV export. Postponed matches, retirements and walkovers are void.
 
 ## What it analyses
 
@@ -131,7 +152,9 @@ js/api.js             ESPN fetchers and parsers
 js/model.js           Prediction model
 js/demo.js            Offline demo data
 js/sources.js         Paid/keyed data source adapters + registry
-js/markets.js         Over 1.5 / 2.5 / BTTS picks, validation, track record
+js/markets.js         Football markets (O1.5/O2.5/BTTS/1X2/1st half), validation, settlement
+js/tennis.js          Tennis model, ESPN tennis parser, tennis markets
+js/records.js         Stored picks and results (Results page)
 js/merge.js           Merging and de-duplicating matches across sources
 sw.js                 Service worker (offline app shell)
 manifest.webmanifest  PWA manifest

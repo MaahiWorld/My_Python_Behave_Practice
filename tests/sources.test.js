@@ -133,3 +133,15 @@ test('recent form can be rebuilt from a team schedule (completed games only, new
   assert.equal(form[3].home, false);
   assert.equal(form[0].opp, 'Opp');
 });
+
+test('half-time score, extra time and ESPN result parsing', async () => {
+  const { halfTime, parseResult, wentToExtraTime } = await import('../js/api.js');
+  assert.deepEqual(halfTime({ linescores: [{ value: 1 }, { value: 1 }] }, { linescores: [{ value: 0 }, { value: 2 }] }), { home: 1, away: 0 });
+  assert.equal(halfTime({}, {}), null);
+  assert.ok(wentToExtraTime({ type: { name: 'STATUS_FINAL_AET' } }));
+  assert.ok(!wentToExtraTime({ type: { name: 'STATUS_FULL_TIME', shortDetail: 'FT' }, period: 2 }));
+  const r = parseResult({ header: { competitions: [{ status: { type: { state: 'post', name: 'STATUS_FULL_TIME', shortDetail: 'FT' }, period: 2 }, competitors: [
+    { homeAway: 'home', score: '2', linescores: [{ displayValue: '1' }, { displayValue: '1' }] },
+    { homeAway: 'away', score: '1', linescores: [{ displayValue: '0' }, { displayValue: '1' }] }] }] } });
+  assert.deepEqual(r, { state: 'post', hs: 2, as: 1, ht: { home: 1, away: 0 }, aet: false, detail: 'FT' });
+});

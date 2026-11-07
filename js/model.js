@@ -16,6 +16,10 @@ export const PARAMS = {
   firstHalfShare: 0.445, // share of a match's goals scored in the first half (measured: 44.5%)
   scoreTrail: 0.2, // trailing side's scoring rate rises by this per goal behind (up to 2)
   scoreLead: 0.06, // leading side's scoring rate falls by this per goal ahead (up to 2)
+  // Match result (1X2) only: the goal model tempers team differences for goal totals, which leaves
+  // win/draw/loss chances too flat. The ratio of the two scoring rates is raised to this power
+  // (total goals kept the same) before computing the result. Fitted on the training seasons.
+  resultSharpen: 1.7,
 };
 const MAX_GOALS = 10;
 
@@ -391,12 +395,42 @@ export function predict(match, detail = {}) {
 
   let homeWin = 0, draw = 0, awayWin = 0, over15 = 0, over25 = 0, btts = 0;
   for (const s of scores) {
-    if (s.home > s.away) homeWin += s.p;
-    else if (s.home < s.away) awayWin += s.p;
-    else draw += s.p;
     if (s.home + s.away > 1.5) over15 += s.p;
     if (s.home + s.away > 2.5) over25 += s.p;
     if (s.home > 0 && s.away > 0) btts += s.p;
+  }
+
+  // First half: goals in the first 45 minutes (plus first-half added time).
+  let firstHalf;
+  if (match.state === 'pre') {
+    const lam = (fullHome + fullAway) * h1Share();
+    firstHalf = { expected: lam, over05: 1 - poisson(0, lam), over15: 1 - poisson(0, lam) - poisson(1, lam), decided: false };
+  } else if (live && phase === 'H1') {
+    const h1Left = (h1Share() / H1_END) * Math.max(0, H1_END - minute);
+    const lam = share > 0 ? remaining * (h1Left / share) : 0;
+    const now = hs + as;
+    const pAtLeast = (k) => (now >= k ? 1 : 1 - Array.from({ length: k - now }, (_, i) => poisson(i, lam)).reduce((s, v) => s + v, 0));
+    firstHalf = { expected: now + lam, over05: pAtLeast(1), over15: pAtLeast(2), decided: false };
+  } else {
+    // First half over: settled by the half-time score when the source gives it.
+    const ht = match.ht && Number.isFinite(match.ht.home) && Number.isFinite(match.ht.away) ? match.ht.home + match.ht.away : null;
+    firstHalf = { expected: ht, over05: ht == null ? null : +(ht > 0.5), over15: ht == null ? null : +(ht > 1.5), decided: true };
+  }
+
+  // Match result from sharpened scoring rates (see PARAMS.resultSharpen).
+  {
+    const k = PARAMS.resultSharpen, g = Math.sqrt(rh * ra);
+    const sh = g > 0 ? rh / ra : 1;
+    const xh = g > 0 ? g * sh ** (k / 2) : rh, xa = g > 0 ? g / sh ** (k / 2) : ra;
+    const scale = g > 0 ? (rh + ra) / (xh + xa) : 1; // keep the total expected goals unchanged
+    for (let i = 0; i <= MAX_GOALS; i++) {
+      for (let j = 0; j <= MAX_GOALS; j++) {
+        const pr = poisson(i, xh * scale) * poisson(j, xa * scale);
+        if (hs + i > as + j) homeWin += pr; else if (hs + i < as + j) awayWin += pr; else draw += pr;
+      }
+    }
+    const tot = homeWin + draw + awayWin || 1;
+    homeWin /= tot; draw /= tot; awayWin /= tot;
   }
 
   const mostLikelyMore = moreDist.indexOf(Math.max(...moreDist));
@@ -425,6 +459,7 @@ export function predict(match, detail = {}) {
     over15,
     over25,
     btts,
+    firstHalf,
     fullMatch: { home: fullHome, away: fullAway },
     ratings: { home: ratings(home, sh), away: ratings(away, sa) },
     strength: { home: sh, away: sa },

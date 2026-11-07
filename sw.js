@@ -1,7 +1,7 @@
 // App-shell cache. Match data always comes from the network.
-const CACHE = 'goalscope-v13';
+const CACHE = 'goalscope-v14';
 const SHELL = [
-  './', 'index.html', 'css/styles.css', 'js/app.js', 'js/api.js', 'js/model.js', 'js/demo.js', 'js/sources.js', 'js/merge.js', 'js/markets.js',
+  './', 'index.html', 'css/styles.css', 'js/app.js', 'js/api.js', 'js/model.js', 'js/demo.js', 'js/sources.js', 'js/merge.js', 'js/markets.js', 'js/records.js', 'js/tennis.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

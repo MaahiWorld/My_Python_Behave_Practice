@@ -88,6 +88,9 @@ export function afParseFixture(f) {
     detail: st.short === 'HT' ? 'HT' : state === 'in' ? `${st.elapsed}'` : st.short || '',
     venue: f.fixture?.venue?.name || '',
     home: team(f.teams?.home, f.goals?.home), away: team(f.teams?.away, f.goals?.away),
+    ...(num(f.score?.halftime?.home) != null && num(f.score?.halftime?.away) != null && state !== 'pre' && st.short !== '1H'
+      ? { ht: { home: num(f.score.halftime.home), away: num(f.score.halftime.away) } } : {}),
+    ...(st.short === 'AET' || st.short === 'PEN' ? { extraTime: true } : {}),
   };
 }
 export function afParseDetail(match, { stats = [], lineups = [], events = [], h2h = [], formH = [], formA = [], standings = [] }) {
@@ -304,6 +307,8 @@ export function fdParseMatch(x) {
     phase: state !== 'in' ? null : x.status === 'PAUSED' ? 'HT' : minute <= 45 ? 'H1' : 'H2',
     detail: x.status === 'PAUSED' ? 'HT' : state === 'in' ? `${minute}'` : '', venue: x.venue || '',
     home: team(x.homeTeam, x.score?.fullTime?.home), away: team(x.awayTeam, x.score?.fullTime?.away),
+    ...(state === 'post' && num(x.score?.halfTime?.home) != null && num(x.score?.halfTime?.away) != null ? { ht: { home: num(x.score.halfTime.home), away: num(x.score.halfTime.away) } } : {}),
+    ...(state === 'post' && /EXTRA|PENALT/.test(x.score?.duration || '') ? { extraTime: true } : {}),
   };
 }
 export function fdParseDetail(match, { standings, h2h, formH, formA, full }) {

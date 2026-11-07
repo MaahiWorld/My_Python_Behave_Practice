@@ -36,7 +36,7 @@ const MORE = [
 ];
 export const LEAGUES = [...NAMED, ...MORE.map((s) => [s, null])];
 const LEAGUE_NAME = Object.fromEntries(LEAGUES);
-const BASE = 'https://site.api.espn.com/apis';
+export const BASE = 'https://site.api.espn.com/apis';
 
 export const num = (v) => {
   const n = typeof v === 'string' ? parseFloat(v) : v;
@@ -60,7 +60,7 @@ async function slot(fn) {
   inFlight++;
   try { return await fn(); } finally { inFlight--; waiting.shift()?.(); }
 }
-async function getJSON(url, proxy, { retries = 2 } = {}) {
+export async function getJSON(url, proxy, { retries = 2 } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await slot(async () => {
@@ -126,6 +126,7 @@ export function parseScoreboard(json, league) {
     if (!h || !a) return [];
     const st = e.status || comp.status || {};
     const state = st.type?.state || 'pre';
+    const ht = halfTime(h, a);
     return [{
       id: String(e.id),
       league, source: 'espn',
@@ -138,8 +139,37 @@ export function parseScoreboard(json, league) {
       venue: comp.venue?.fullName || '',
       home: parseTeam(h, comp.details),
       away: parseTeam(a, comp.details),
+      ...(ht && (state === 'post' || (state === 'in' && (st.period || 0) >= 2)) ? { ht } : {}),
+      ...(state === 'post' && wentToExtraTime(st) ? { extraTime: true } : {}),
     }];
   });
+}
+
+// Half-time score from each side's per-period line scores (first entry = first half).
+export function halfTime(h, a) {
+  const first = (c) => num(c?.linescores?.[0]?.value ?? c?.linescores?.[0]?.displayValue);
+  const hh = first(h), aa = first(a);
+  return hh == null || aa == null ? null : { home: hh, away: aa };
+}
+// Finished after extra time or penalties (1X2 is settled on the 90-minute score, which was level).
+export const wentToExtraTime = (st) => /AET|PEN|EXTRA|SHOOTOUT/i.test(`${st?.type?.name || ''} ${st?.type?.shortDetail || ''}`) || (st?.period || 0) > 2;
+
+// Final result of one ESPN football match from its summary (Results page re-checks).
+export function parseResult(json) {
+  const comp = json?.header?.competitions?.[0];
+  const cs = comp?.competitors || [];
+  const h = cs.find((c) => c.homeAway === 'home') || cs[0];
+  const a = cs.find((c) => c.homeAway === 'away') || cs[1];
+  const st = comp?.status || json?.header?.status || {};
+  const state = st.type?.state || (st.type?.completed ? 'post' : 'pre');
+  if (!h || !a) return null;
+  const hs = num(h.score?.value ?? h.score), as = num(a.score?.value ?? a.score);
+  if (hs == null || as == null) return { state };
+  return { state, hs, as, ht: halfTime(h, a), aet: state === 'post' && wentToExtraTime(st), detail: st.type?.shortDetail || '' };
+}
+
+export async function fetchResult(league, id, { proxy } = {}) {
+  return parseResult(await getJSON(`${BASE}/site/v2/sports/soccer/${league}/summary?event=${id}`, proxy, { retries: 1 }));
 }
 
 function parseGame(ev, teamId) {
@@ -332,7 +362,7 @@ export const FAMOUS = [
   'eng.fa', 'eng.league_cup', 'esp.copa_del_rey', 'ger.dfb_pokal', 'ita.coppa_italia', 'fra.coupe_de_france',
   'conmebol.libertadores', 'uefa.nations', 'fifa.worldq.uefa', 'fifa.world', 'uefa.euro',
 ];
-const ymd = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+export const ymd = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 
 // Fixtures not yet started in the next `days` days. One request per competition for the whole
 // date range; if ESPN rejects the range, falls back to one request per day.

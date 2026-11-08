@@ -12,18 +12,35 @@ export const PARAMS = {
   formK: 12, // recent form shrinkage toward average, in matches
   formWeight: 0.2, // weight of recent form against the season level
   h2hWeight: 0.1, // maximum weight of head-to-head history
-  strengthPower: 0.6, // <1 tempers how far attack/defence strength moves a team from average
+  strengthPower: 0.7, // <1 tempers how far attack/defence strength moves a team from average
   firstHalfShare: 0.445, // share of a match's goals scored in the first half (measured: 44.5%)
   scoreTrail: 0.2, // trailing side's scoring rate rises by this per goal behind (up to 2)
   scoreLead: 0.06, // leading side's scoring rate falls by this per goal ahead (up to 2)
-  // Match result (1X2) only: the goal model tempers team differences for goal totals, which leaves
-  // win/draw/loss chances too flat. The ratio of the two scoring rates is raised to this power
-  // (total goals kept the same) before computing the result. Fitted on the training seasons.
-  resultSharpen: 1.7,
+  // Match result (1X2) only. The goal model tempers team differences for goal totals, which leaves
+  // win/draw/loss chances too flat. For the result, the ratio of the two scoring rates is multiplied by
+  // exp(ptsWeight × points-per-game gap) — the league table's points carry result information the goal
+  // record alone misses; without a table, points per game in recent form at ptsFormWeight — and then
+  // raised to resultSharpen, keeping total goals the same. Before kick-off draws are scaled by drawFactor.
+  // All fitted on the training seasons by log loss (backtest/RESULTS.md, "Model comparison").
+  resultSharpen: 1.2,
+  ptsWeight: 0.3,
+  ptsFormWeight: 0.15,
+  drawFactor: 1.1,
+  // Pre-match only: logistic recalibration p' = sigmoid(a + b·logit p) of a yes/no market's "yes"
+  // probability, fitted on the training seasons. Missing or [0, 1] = unchanged.
+  calib: { over15: [0.284, 0.782], over25: [0.034, 0.798], btts: [0.018, 0.598] },
 };
 const MAX_GOALS = 10;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const logit = (p) => Math.log(p / (1 - p));
+// Applies a market's logistic recalibration (PARAMS.calib) to a probability.
+export function calibrate(key, p) {
+  const c = PARAMS.calib?.[key];
+  if (p == null || !c || (c[0] === 0 && c[1] === 1)) return p;
+  const q = clamp(p, 1e-6, 1 - 1e-6);
+  return 1 / (1 + Math.exp(-(c[0] + c[1] * logit(q))));
+}
 
 export function poisson(k, lambda) {
   if (lambda <= 0) return k === 0 ? 1 : 0;
@@ -210,6 +227,18 @@ export function confidence(match, detail, h2h) {
   return { level, have, missing };
 }
 
+// Result-only strength from points per game, as a log scoring-rate ratio: from the league table when
+// both teams have played 5+ games (PARAMS.ptsWeight), otherwise from recent form, 4+ matches each
+// (PARAMS.ptsFormWeight), otherwise 0.
+export function ppgEdge(detail) {
+  const th = detail.table?.home, ta = detail.table?.away;
+  if (th?.gp >= 5 && ta?.gp >= 5 && Number.isFinite(th.pts) && Number.isFinite(ta.pts)) return PARAMS.ptsWeight * (th.pts / th.gp - ta.pts / ta.gp);
+  const fh = detail.form?.home, fa = detail.form?.away;
+  if (!PARAMS.ptsFormWeight || !(fh?.length >= 4 && fa?.length >= 4)) return 0;
+  const ppg = (f) => f.slice(0, 5).reduce((s, g) => s + (g.res === 'W' ? 3 : g.res === 'D' ? 1 : 0), 0) / Math.min(5, f.length);
+  return PARAMS.ptsFormWeight * (ppg(fh) - ppg(fa));
+}
+
 export function predict(match, detail = {}) {
   const mu = detail.leagueAvg || DEFAULT_LEAGUE_AVG;
   const home = { ...match.home, form: detail.form?.home, table: detail.table?.home };
@@ -387,6 +416,7 @@ export function predict(match, detail = {}) {
   moreDist[5] = Math.max(0, 1 - moreDist.slice(0, 5).reduce((s, p) => s + p, 0));
 
   // Final score matrix.
+  const pre = match.state === 'pre';
   const scores = [];
   for (let i = 0; i <= MAX_GOALS; i++)
     for (let j = 0; j <= MAX_GOALS; j++)
@@ -417,10 +447,11 @@ export function predict(match, detail = {}) {
     firstHalf = { expected: ht, over05: ht == null ? null : +(ht > 0.5), over15: ht == null ? null : +(ht > 1.5), decided: true };
   }
 
-  // Match result from sharpened scoring rates (see PARAMS.resultSharpen).
+  // Match result from sharpened scoring rates (see PARAMS.resultSharpen, ptsWeight, drawFactor).
+  // drawFactor applies before kick-off only: once live, the scoreline already shapes the draw chance.
   {
     const k = PARAMS.resultSharpen, g = Math.sqrt(rh * ra);
-    const sh = g > 0 ? rh / ra : 1;
+    const sh = g > 0 ? (rh / ra) * Math.exp(ppgEdge(detail)) : 1;
     const xh = g > 0 ? g * sh ** (k / 2) : rh, xa = g > 0 ? g / sh ** (k / 2) : ra;
     const scale = g > 0 ? (rh + ra) / (xh + xa) : 1; // keep the total expected goals unchanged
     for (let i = 0; i <= MAX_GOALS; i++) {
@@ -429,8 +460,16 @@ export function predict(match, detail = {}) {
         if (hs + i > as + j) homeWin += pr; else if (hs + i < as + j) awayWin += pr; else draw += pr;
       }
     }
+    if (pre) draw *= PARAMS.drawFactor;
     const tot = homeWin + draw + awayWin || 1;
     homeWin /= tot; draw /= tot; awayWin /= tot;
+  }
+
+  // Pre-match calibration (fitted on pre-match data only, so live probabilities are left as they are).
+  if (pre) {
+    over15 = calibrate('over15', over15);
+    over25 = calibrate('over25', over25);
+    btts = calibrate('btts', btts);
   }
 
   const mostLikelyMore = moreDist.indexOf(Math.max(...moreDist));

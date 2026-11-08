@@ -1,109 +1,158 @@
 # Backtest results
 
-Run on 2026-11-06 with `backtest/fetch-data.sh` + `backtest/run.js`; full figures in `results.json`.
+Run on 2026-11-08 with `backtest/fetch-data.sh` + `backtest/run.js`; full figures in `results.json`.
 
 ## Data and method
 
-- **24,831 finished matches** from 12 European leagues (England 1–2, Germany, Spain, Italy, France,
+- **25,056 finished matches** from 12 European leagues (England 1–2, Germany, Spain, Italy, France,
   Netherlands, Portugal, Scotland, Turkey, Belgium, Austria), seasons 2019-20 to 2026-27 so far.
   Source: openfootball (final and half-time scores).
 - Every match is replayed through the app's own code (`js/model.js`, `js/markets.js`) using only what
-  was known **before kick-off**: the season table to that date, each team's last 5 results,
-  earlier head-to-head meetings and the league's scoring average. Results are added only after the
-  prediction (no look-ahead).
-- The model's settings were tuned on **2019-20 to 2023-24** (17,356 matches). All headline numbers
-  below are from **2024-25 to 2026-27** (7,475 matches), which the tuning never saw.
-- 5,991 of the test matches had a **high-confidence** prediction (season record and recent form for
+  was known **before kick-off**: the season table to that date (games, goals, points), each team's
+  last 5 results, earlier head-to-head meetings and the league's scoring average. Results are added
+  only after the prediction (no look-ahead).
+- The model's settings and pick bars were chosen on **2019-20 to 2023-24** (17,356 matches). All
+  headline numbers below are from **2024-25 to 2026-27** (7,700 matches), which the tuning never saw.
+- 6,229 of the test matches had a **high-confidence** prediction (season record and recent form for
   both teams); the rest are excluded, as in the app.
 - Not covered: in-play match stats and xG (the historical data has none), so the "current match
-  stats" part of the model is untested.
+  stats" part of the model is untested. There are no bookmaker odds in the data, so **betting
+  yield (profit per stake) can't be measured**; "more yield" here means more correct picks at the
+  same or better hit rate. See "Fair odds" below for the prices a pick needs to be worth backing.
+
+## Data fix (2026-11-08): goalless draws were missing
+
+openfootball writes goalless draws differently: from 2025-26 as `score: [0, 0]` instead of
+`{ft, ht}`, and in every season without a half-time score. The loader skipped them, so:
+
+- **every 0-0 from 2025-26 and 2026-27 was missing** (225 matches). That flattered the Over markets on
+  the unseen seasons and left those matches out of the tables and form the model learns from;
+- **every 0-0 was missing from the first-half markets** (1,429 matches), which flattered 1st half
+  Over 0.5 and made the model look under-confident there when it wasn't.
+
+Both are now read as 0-0 at full time and half time (`backtest/lib.js`, with a test). The previously
+published figures (85.1 of 100 for Over 1.5, 84.5 of 100 overall) were inflated by this; the
+honest figure for the settings shipped on 2026-11-07 is **83.3 of 100 (1,329 of 1,595)**.
 
 ## Headline: out of 100
 
-| On unseen seasons (2024-25 to 2026-27) | Before tuning | After tuning |
+| On unseen seasons (2024-25 to 2026-27) | Settings of 2026-11-07 | **Now** |
 | --- | --- | --- |
-| **Validated Goal-market picks correct** | 80.9 (2,956 of 3,653) | **85.1 (1,363 of 1,601)** |
-| — Over 1.5 picks | 81.6 (claimed 82) | **85.1** (claimed 83) |
-| — Over 2.5 picks | 73.3 (claimed 79) | no pick reached the bar |
-| — BTTS picks | 66.7 (claimed 77) | no pick reached the bar |
+| **All validated picks correct** | 83.3 (1,329 of 1,595) | **83.4 (1,353 of 1,622)** |
+| — Over 1.5 | 83.3 (1,083 of 1,300) | **83.7** (1,041 of 1,244) |
+| — Full-time result (1X2) | 81.0 (85 of 105) | **84.1 (122 of 145)** |
+| — 1st half Over 0.5 | 84.7 (161 of 190) | 81.5 (190 of 233) |
+| — Over 2.5, BTTS, 1st half Over 1.5 | no picks | no picks |
 
-For comparison, Over 1.5 happened in **79.1 of 100** high-confidence matches anyway, so the picks
-are about **6 points better than always backing Over 1.5**.
+More picks at the same hit rate: 24 more correct picks on the same matches. Over 1.5 happens in
+**76.9 of 100** high-confidence matches anyway, so its picks are about 7 points better than always
+backing it; a first-half goal happens 71.7 in 100 anyway. 1X2 picks are favourites to win, now
+including away favourites (10 of 10 correct).
 
-## New markets (added 2026-11-07): full-time result and first-half goals
+## Model comparison (2026-11-08)
 
-Same data, same method, same train/test split. The half-time scores in the data let the
-first-half markets be tested too.
+Candidates from the football-prediction literature, each tried on top of the existing model using
+only data the app has live (league table, last 5 results, head-to-head). Each was fitted on the
+training seasons and kept only if it also improved the unseen seasons. Log loss (lower is better):
 
-| On unseen seasons (2024-25 to 2026-27) | Picks | Correct | Model claimed | Base rate |
+| Candidate | Market | Train: before → after | Unseen: before → after | Kept? |
 | --- | --- | --- | --- | --- |
-| **Full-time result (1X2)**, model ≥ 70%, checks ≥ 60% | 109 | **82.6 of 100** (90) | 74.6 | home win 44.8 overall |
-| **1st half Over 0.5**, model ≥ 78%, checks ≥ 70% | 247 | **81.4 of 100** (201) | 79.6 | 76.5 |
-| 1st half Over 1.5 / Under 1.5, model ≥ 80% | 0 | – | – | Under 1.5: 63.0 |
+| **Points per game** as a team rating for the result (league table; recent form when no table) | 1X2 | 1.0183 → **1.0085** | 1.0174 → **1.0078** | **Yes** |
+| Draw adjustment (`drawFactor` 1.1) | 1X2 | part of the row above | | Yes |
+| **Logistic recalibration** per market (Platt scaling) | BTTS | 0.6898 → **0.6880** | 0.6870 → **0.6865** | **Yes** |
+| | Over 2.5 | 0.6837 → 0.6830 | 0.6850 → 0.6841 | Yes |
+| | Over 1.5 | 0.5402 → 0.5397 | 0.5358 → 0.5352 | Yes |
+| | 1st half Over 0.5 / 1.5 | tiny gain | **worse** | No |
+| Dixon-Coles low-score correction (ρ from −0.15 to +0.05) | all | no gain; BTTS worse at ρ < 0 | ±0.0007 | No |
+| Home advantage measured per league (1.03 Austria to 1.14 Spain) | all | −0.0009 (1X2) | +0.0003 (1X2) | No |
+| Negative binomial (overdispersed goals) | totals | not needed: goal counts are slightly *under*-dispersed vs Poisson (Pearson 0.97 train, 0.87 test) | | No |
+| Re-fit of the goal model on the corrected data (`strengthPower` 0.6 → 0.7) | all | combined with the rows kept above: 0.6040 → 0.6033 | 0.6024 → 0.6019 | Yes |
 
-All Goal-market picks together on unseen seasons: **84.5 of 100** (1,654 of 1,957).
+Not tried because the app has no data for them live: Elo / pi-ratings and opponent-adjusted
+(Dixon-Coles style) team strengths need every team's full match history, and xG models need shot
+data. Those are the next step if a source with full fixture history is added.
 
-- **1X2 needed its own calibration.** The goal model tempers team differences (good for goal
-  totals), which made win chances far too flat: when it said 62% the favourite actually won 86%.
-  For the result only, the ratio of the two teams' scoring rates is raised to a fitted power
-  (`PARAMS.resultSharpen` = 1.7, fitted on the training seasons by log loss; total goals unchanged).
-  After that, 50–70% predictions are about right; above 70% it is still under-confident
-  (73% said, 86% happened, 158 matches), which is why the 70% bar is enough. Every 1X2 pick so far
-  has been a home win.
-- **1st half Over 0.5** is slightly under-confident (73% said, 79% happened). The 78% bar was chosen on
-  the training seasons (543 picks, 81.8% correct) and held up on the unseen ones.
-- **1st half Over 1.5 / Under 1.5** is over-confident at 70–80% on training data (72% said, 67%
-  happened), so it keeps the default 80% bar and gives no pre-match picks. Live picks late in the
-  first half are possible but untested (the data has no in-play timing).
-- Thresholds were chosen with `minProb` / `minCheck` sweeps on the training seasons only.
+Why points per game helps the result: goal records are tempered (`strengthPower`) because that is
+right for goal totals, which left win chances too flat. The league table's points carry who actually
+wins games (narrow wins, late winners) that goal difference alone misses. It's applied as
+`exp(0.3 × points-per-game gap)` on the ratio of the two teams' scoring rates, for the result only,
+so goal totals are unchanged. With no table (cups), points per game from the last 5 results is used
+at a smaller weight (0.15).
+
+Calibration of 1X2 on unseen seasons (said → happened):
+
+| Model said | 2026-11-07 settings | Now |
+| --- | --- | --- |
+| 60–70% | 64.0 → 68.6 (653) | 64.2 → 66.3 (812) |
+| 70–80% | 73.3 → **83.8** (154) | 74.1 → **77.2** (325) |
+| 80–90% | 81.8 → 42.9 (7) | 83.0 → 84.3 (51) |
+
+BTTS above 60% was over-confident (63.1% said, 60.7% happened); after recalibration it says 61.5%
+and 59.8% happens, and no BTTS probability reaches 70%, so BTTS still gives no picks. Calibration is
+applied before kick-off only (it was fitted on pre-match data); live probabilities are unchanged.
+
+## Pick bars
+
+Chosen on the training seasons only, as the bar that gives the most picks while keeping at least
+82 of 100 correct there (`js/markets.js`):
+
+| Market | Bar (model / every check) | Train | Unseen |
+| --- | --- | --- | --- |
+| Over 1.5 | 80% / 70% | 83.2 (3,594) | 83.7 (1,244) |
+| 1X2 | 75% / 50% (was 70% / 60%) | 82.4 (398) | 84.1 (145) |
+| 1st half Over 0.5 | 78% / 70% (kept; no bar reaches 82 on training) | 79.3 (685) | 81.5 (233) |
+| 1st half Over 1.5 / Under 1.5 | 85% (was 80%: 7 training picks, 4 correct) | – | – |
+| Over 2.5, BTTS | 80% / 70% (no bar with a usable number of picks reaches 82 on training) | – | – |
+
+## Fair odds
+
+Without odds data the app can't tell whether a pick is good value, only how often it lands. A pick
+that lands *p* of the time breaks even at decimal odds of 1 / *p*:
+
+| Market | Hit rate on unseen seasons | Break-even odds |
+| --- | --- | --- |
+| Over 1.5 | 83.7% | 1.19 |
+| 1X2 favourite | 84.1% | 1.19 |
+| 1st half Over 0.5 | 81.5% | 1.23 |
+
+Only odds above these would have made money over the backtest; bookmakers often price these
+selections below that, so a high hit rate is not the same as a profit.
 
 ## Every high-confidence match (not just picks)
 
-Calling whichever side the model rates above 50%:
+Calling whichever side the model rates above 50%, on unseen seasons:
 
 | Market | Model correct | Always backing the more common side |
 | --- | --- | --- |
-| Over 1.5 | 79.1 | 79.1 |
-| Over 2.5 | 56.2 | 54.6 |
-| BTTS | 56.3 | 56.4 |
+| Over 1.5 | 76.9 | 76.9 |
+| Over 2.5 | 55.4 | 53.2 |
+| BTTS | 54.9 | 54.9 |
+| 1X2 | 50.5 | 43.6 (home win) |
 
-So on single matches the model barely beats the simple baseline: goals are hard to predict from
-results alone. What tuning fixed is **honesty of the probabilities** (calibration):
-
-| Over 2.5, model said | Before: actually happened | After: actually happened |
-| --- | --- | --- |
-| 60–70% (avg 63–64%) | 57% | **63%** |
-| 70–80% (avg 73%) | 63% | **81%** (67 matches) |
-
-BTTS above 70% remains overconfident (72% said, 60% happened, 37 matches), which is why BTTS
-picks now need 80% and don't occur.
+On single matches the goal markets barely beat the simple baseline: goals are hard to predict from
+results alone. The value is in honest probabilities, which is what makes the high-confidence picks
+work.
 
 ## Rest of the match from half time
 
-- Another goal after half time happened in **85 of 100** matches. The model's yes/no call is right
-  85 times in 100, the same as always saying "yes": it adds no edge here.
-- Expected second-half goals: 1.66 predicted vs 1.64 actual on average.
-- The most likely number of further goals was exactly right **36 times in 100**.
+- Another goal after half time happened in **80 of 100** matches. The model's yes/no call is right
+  80 times in 100, the same as always saying "yes": it adds no edge here.
+- Expected second-half goals: 1.61 predicted vs 1.54 actual on average.
+- The most likely number of further goals was exactly right **33 times in 100**.
 
-## What changed after tuning
+## Earlier tuning (2026-11-06)
 
-Settings fitted on the training seasons (`js/model.js` `PARAMS`):
-
-- Team strength differences tempered (`strengthPower` 1 → 0.6): raw goal records overstated how
-  different teams are.
-- Small samples pulled harder toward average (`seasonK` 4 → 16, `formK` 2 → 12).
-- Recent form weight 35% → 20%; head-to-head weight 25% → 10%.
-- Trailing team's push 12% → 20% per goal behind.
-- Home advantage (1.10) and first-half share of goals (44.5%) set to the values measured in the data.
-
-Pick rules (`js/markets.js` `RULES`): model ≥ 80% (was 75%) and every cross-check ≥ 70% (was 60%).
-On the training seasons, these rules gave 82.7% over 3,802 picks; 75%/60% gave 79.9%; 85%/70%
-gave 85.9% but only 687 picks.
+Settings fitted on the training seasons (`js/model.js` `PARAMS`): team strength differences tempered
+(`strengthPower` 1 → 0.6, now 0.7), small samples pulled harder toward average (`seasonK` 4 → 16,
+`formK` 2 → 12), recent form weight 35% → 20%, head-to-head weight 25% → 10%, trailing team's push
+12% → 20% per goal behind, home advantage (1.10) and first-half share of goals (44.5%) set to the
+values measured in the data. Before that tuning, on the corrected data, picks were 78.9 of 100
+correct on unseen seasons (Over 1.5: 79.7 of 3,162; Over 2.5: 70.0 of 230; BTTS: 65.0 of 40).
 
 ## Re-running
 
 ```bash
 backtest/fetch-data.sh /tmp/football-data
-node backtest/tune.js /tmp/football-data   # optional: re-fit settings on the training seasons
+node backtest/tune.js /tmp/football-data   # optional: re-fit settings on the training seasons (~2 min)
 node backtest/run.js /tmp/football-data    # writes backtest/results.json
 ```

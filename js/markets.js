@@ -54,7 +54,7 @@ export const MARKETS = [
       return mine > theirs ? 'home' : mine < theirs ? 'away' : 'draw';
     },
     decided: (m, phase) => ET_PHASES.includes(phase),
-    minProb: 0.7, minCheck: 0.6, rule: 'result after 90 minutes (extra time not counted)',
+    minProb: 0.75, minCheck: 0.5, rule: 'result after 90 minutes (extra time not counted)',
   },
   {
     id: 'h1o05', tab: '1H O0.5', name: '1st half: Over 0.5 goals', yes: '1st half Over 0.5', no: '1st half Under 0.5',
@@ -66,7 +66,7 @@ export const MARKETS = [
     id: 'h1o15', tab: '1H O1.5', name: '1st half: Over 1.5 goals', yes: '1st half Over 1.5', no: '1st half Under 1.5',
     probs: (p) => yesNo(p.firstHalf?.over15), settle: (r) => (r.ht ? (r.ht.home + r.ht.away > 1.5 ? 'yes' : 'no') : null),
     decided: (m, phase) => phase !== 'H1' || (m.home.score || 0) + (m.away.score || 0) > 1.5,
-    rule: 'needs 2+ goals before half time',
+    minProb: 0.85, rule: 'needs 2+ goals before half time',
   },
 ];
 export const marketById = (id) => MARKETS.find((m) => m.id === id);

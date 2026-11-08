@@ -29,10 +29,13 @@ are hidden, with a count of how many and why; ⚙ Settings can show them if you 
 
 ## How accurate is it? (backtest)
 
-Replayed on 24,831 finished matches from 12 European leagues, tuned on 2019-20 to 2023-24 and scored
-on 2024-25 to 2026-27 (unseen): validated Goal-market picks were correct **85 times in 100**
-(1,363 of 1,601, all Over 1.5, against a natural Over 1.5 rate of 79 in 100). Full results, including
-where the model adds little, in [backtest/RESULTS.md](backtest/RESULTS.md).
+Replayed on 25,056 finished matches from 12 European leagues, tuned on 2019-20 to 2023-24 and scored
+on 2024-25 to 2026-27 (unseen): validated picks were correct **83 times in 100** (1,353 of 1,622):
+Over 1.5 83.7% (against a natural Over 1.5 rate of 77 in 100), full-time result 84.1%, 1st half
+Over 0.5 81.5%. The model combines a Poisson goal model (attack/defence, form, head-to-head) with a
+league-points rating for match results and per-market calibration; candidates that didn't beat it on
+unseen seasons (Dixon-Coles, per-league home advantage, negative binomial) were left out. Full
+results, including where the model adds little, in [backtest/RESULTS.md](backtest/RESULTS.md).
 
 ## Markets page
 
@@ -44,14 +47,14 @@ Brazil, Argentina, Saudi Pro League, internationals). An **Upcoming fixtures** s
 high-confidence fixture with its Over 1.5 / Over 2.5 / BTTS chances, grouped by day. A pick appears only when:
 
 1. the match prediction is high confidence;
-2. the model gives it at least 80% (1X2: 70%; 1st half Over 0.5: 78%, set on the backtest's training seasons);
-3. independent cross-checks all agree at 70%+ (1X2: 60%+): the season record alone, recent form alone, the
+2. the model gives it at least 80% (1X2: 75%; 1st half Over 0.5: 78%; 1st half Over 1.5: 85%, set on the backtest's training seasons);
+3. independent cross-checks all agree at 70%+ (1X2: 50%+): the season record alone, recent form alone, the
    prediction without live match stats, and head-to-head history (4+ meetings, before kick-off),
    with at least two checks required;
 4. the market isn't already decided (first-half markets close at half time).
 
-Backtested on unseen seasons: 1X2 picks 82.6% correct (90 of 109), 1st half Over 0.5 picks 81.4%
-(201 of 247). Each match page also has a **Markets for this match** panel with the most likely side of
+Backtested on unseen seasons: 1X2 picks 84.1% correct (122 of 145), 1st half Over 0.5 picks 81.5%
+(190 of 233). Each match page also has a **Markets for this match** panel with the most likely side of
 every market and why it is or isn't a pick.
 
 ## Tennis page (experimental)

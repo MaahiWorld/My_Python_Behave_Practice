@@ -8,6 +8,10 @@ import { marketPicks, MARKETS, sidesOf, bestSide } from '../js/markets.js';
 // Result of a finished match in the shape the markets settle on.
 export const resultOf = (m) => ({ hs: m.ft[0], as: m.ft[1], ht: m.ht ? { home: m.ht[0], away: m.ht[1] } : null, aet: false });
 
+// openfootball league codes -> ESPN league ids (as the app sees them).
+export const ESPN_ID = { 'en.1': 'eng.1', 'en.2': 'eng.2', 'de.1': 'ger.1', 'es.1': 'esp.1', 'it.1': 'ita.1', 'fr.1': 'fra.1',
+  'nl.1': 'ned.1', 'pt.1': 'por.1', 'sco.1': 'sco.1', 'tr.1': 'tur.1', 'be.1': 'bel.1', 'at.1': 'aut.1' };
+
 export const TRAIN_SEASONS = ['2019-20', '2020-21', '2021-22', '2022-23', '2023-24'];
 
 // Returns one context per finished match: the match as the app would see it before kick-off and at
@@ -19,8 +23,13 @@ export function loadContexts(dir) {
     const league = rest.join('.');
     const data = JSON.parse(readFileSync(join(dir, f), 'utf8'));
     for (const m of data.matches || []) {
-      const sc = m.score;
+      // openfootball leaves out the half-time score of goalless draws, and from 2025-26 writes them as
+      // `score: [0, 0]` instead of {ft, ht}. Skipping those dropped every 0-0 from the recent seasons and
+      // every 0-0 from the first-half markets, so read them as 0-0 at full time and at half time.
+      let sc = m.score;
+      if (Array.isArray(sc)) sc = { ft: sc };
       if (!sc || !Array.isArray(sc.ft) || sc.ft.length !== 2) continue;
+      if (!Array.isArray(sc.ht) && sc.ft[0] === 0 && sc.ft[1] === 0) sc = { ...sc, ht: [0, 0] };
       const list = byLeague.get(league) || [];
       list.push({ season, league, date: m.date, time: m.time || '', home: m.team1, away: m.team2, ft: sc.ft, ht: Array.isArray(sc.ht) ? sc.ht : null });
       byLeague.set(league, list);
@@ -38,7 +47,7 @@ export function loadContexts(dir) {
     for (const m of matches) {
       const table = tables.get(m.season) || new Map();
       tables.set(m.season, table);
-      const row = (t) => table.get(t) || { gp: 0, gf: 0, ga: 0 };
+      const row = (t) => table.get(t) || { gp: 0, gf: 0, ga: 0, pts: 0 };
       const sg = seasonGoals.get(m.season) || { gp: 0, gf: 0 };
       const form = (t) => (hist.get(t) || []).slice(-5).reverse();
       const detail = {
@@ -48,7 +57,7 @@ export function loadContexts(dir) {
         leagueAvg: sg.gp >= 20 ? sg.gf / sg.gp : null,
       };
       const team = (name) => ({ id: name, name, short: name, abbr: name.slice(0, 3), score: 0 });
-      const match = { id: `${m.date}-${m.home}`, league, leagueName: league, state: 'pre', minute: 0, date: m.date, home: team(m.home), away: team(m.away) };
+      const match = { id: `${m.date}-${m.home}`, league: ESPN_ID[league] || league, leagueName: league, state: 'pre', minute: 0, date: m.date, home: team(m.home), away: team(m.away) };
 
       const htMatch = m.ht ? { ...match, state: 'in', minute: 45, phase: 'HT', detail: 'HT', home: { ...match.home, score: m.ht[0] }, away: { ...match.away, score: m.ht[1] } } : null;
       rows.push({ m, match, htMatch, detail });
@@ -57,7 +66,7 @@ export function loadContexts(dir) {
       const [hs, as] = m.ft;
       for (const [t, gf, ga] of [[m.home, hs, as], [m.away, as, hs]]) {
         const r = row(t);
-        table.set(t, { gp: r.gp + 1, gf: r.gf + gf, ga: r.ga + ga });
+        table.set(t, { gp: r.gp + 1, gf: r.gf + gf, ga: r.ga + ga, pts: r.pts + (gf > ga ? 3 : gf === ga ? 1 : 0) });
         const list = hist.get(t) || [];
         list.push({ gf, ga, res: gf > ga ? 'W' : gf < ga ? 'L' : 'D', home: t === m.home, date: m.date });
         hist.set(t, list);

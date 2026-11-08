@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-07T17:39:56.541Z",
+  "generated": "2026-11-08T07:35:47.772Z",
   "leagues": [
     "at.1",
     "be.1",
@@ -21,39 +21,82 @@
       "formK": 12,
       "formWeight": 0.2,
       "h2hWeight": 0.1,
-      "strengthPower": 0.6,
+      "strengthPower": 0.7,
       "firstHalfShare": 0.445,
       "scoreTrail": 0.2,
       "scoreLead": 0.06,
-      "resultSharpen": 1.7
+      "resultSharpen": 1.2,
+      "ptsWeight": 0.3,
+      "ptsFormWeight": 0.15,
+      "drawFactor": 1.1,
+      "calib": {
+        "over15": [
+          0.284,
+          0.782
+        ],
+        "over25": [
+          0.034,
+          0.798
+        ],
+        "btts": [
+          0.018,
+          0.598
+        ]
+      }
     },
     "rules": {
       "minProb": 0.8,
       "minCheck": 0.7
+    },
+    "markets": {
+      "o15": {
+        "minProb": 0.8,
+        "minCheck": 0.7
+      },
+      "o25": {
+        "minProb": 0.8,
+        "minCheck": 0.7
+      },
+      "btts": {
+        "minProb": 0.8,
+        "minCheck": 0.7
+      },
+      "1x2": {
+        "minProb": 0.75,
+        "minCheck": 0.5
+      },
+      "h1o05": {
+        "minProb": 0.78,
+        "minCheck": 0.7
+      },
+      "h1o15": {
+        "minProb": 0.85,
+        "minCheck": 0.7
+      }
     }
   },
   "test": {
     "data": {
-      "matches": 7475,
+      "matches": 7700,
       "seasons": "2024-25 to 2026-27",
-      "highConfidence": 5991,
-      "logLoss": 0.5775
+      "highConfidence": 6229,
+      "logLoss": 0.6019
     },
     "picks": {
-      "total": 1957,
-      "won": 1654,
-      "hitRate": 84.5,
+      "total": 1622,
+      "won": 1353,
+      "hitRate": 83.4,
       "byMarket": {
         "o15": {
           "name": "Over 1.5 goals",
-          "picks": 1601,
-          "won": 1363,
-          "hitRate": 85.1,
-          "avgPredicted": 83,
+          "picks": 1244,
+          "won": 1041,
+          "hitRate": 83.7,
+          "avgPredicted": 82.4,
           "bySide": {
             "Over 1.5": {
-              "n": 1601,
-              "won": 1363
+              "n": 1244,
+              "won": 1041
             }
           }
         },
@@ -75,27 +118,31 @@
         },
         "1x2": {
           "name": "Full-time result",
-          "picks": 109,
-          "won": 90,
-          "hitRate": 82.6,
-          "avgPredicted": 74.6,
+          "picks": 145,
+          "won": 122,
+          "hitRate": 84.1,
+          "avgPredicted": 79.2,
           "bySide": {
             "home": {
-              "n": 109,
-              "won": 90
+              "n": 135,
+              "won": 112
+            },
+            "away": {
+              "n": 10,
+              "won": 10
             }
           }
         },
         "h1o05": {
           "name": "1st half: Over 0.5 goals",
-          "picks": 247,
-          "won": 201,
-          "hitRate": 81.4,
+          "picks": 233,
+          "won": 190,
+          "hitRate": 81.5,
           "avgPredicted": 79.6,
           "bySide": {
             "1st half Over 0.5": {
-              "n": 247,
-              "won": 201
+              "n": 233,
+              "won": 190
             }
           }
         },
@@ -111,605 +158,202 @@
     },
     "highConfidenceMarkets": {
       "o15": {
-        "n": 5991,
-        "accuracy": 79.1,
-        "brier": 0.328,
-        "baseline": 79.1,
+        "n": 6229,
+        "accuracy": 76.9,
+        "brier": 0.352,
+        "baseline": 76.9,
         "baselineSide": "always yes",
         "calibration": [
           {
-            "range": "50-60%",
-            "n": 5,
-            "predicted": 59.6,
-            "actual": 20
-          },
-          {
             "range": "60-70%",
-            "n": 498,
-            "predicted": 67.5,
-            "actual": 69.9
+            "n": 426,
+            "predicted": 68.4,
+            "actual": 70.9
           },
           {
             "range": "70-80%",
-            "n": 3875,
-            "predicted": 75.7,
-            "actual": 77.8
+            "n": 4551,
+            "predicted": 75.5,
+            "actual": 75.7
           },
           {
             "range": "80-90%",
-            "n": 1597,
-            "predicted": 82.9,
-            "actual": 85
+            "n": 1251,
+            "predicted": 82.4,
+            "actual": 83.5
           },
           {
             "range": "90-100%",
-            "n": 16,
-            "predicted": 90.9,
-            "actual": 87.5
-          }
-        ]
-      },
-      "o25": {
-        "n": 5991,
-        "accuracy": 56.2,
-        "brier": 0.488,
-        "baseline": 54.6,
-        "baselineSide": "always yes",
-        "calibration": [
-          {
-            "range": "50-60%",
-            "n": 4769,
-            "predicted": 54.2,
-            "actual": 54.1
-          },
-          {
-            "range": "60-70%",
-            "n": 1155,
-            "predicted": 63.2,
-            "actual": 63.2
-          },
-          {
-            "range": "70-80%",
-            "n": 67,
-            "predicted": 73,
-            "actual": 80.6
-          }
-        ]
-      },
-      "btts": {
-        "n": 5991,
-        "accuracy": 56.3,
-        "brier": 0.49,
-        "baseline": 56.4,
-        "baselineSide": "always yes",
-        "calibration": [
-          {
-            "range": "50-60%",
-            "n": 4622,
-            "predicted": 54.8,
-            "actual": 54.5
-          },
-          {
-            "range": "60-70%",
-            "n": 1332,
-            "predicted": 63.2,
-            "actual": 62.4
-          },
-          {
-            "range": "70-80%",
-            "n": 37,
-            "predicted": 72.1,
-            "actual": 59.5
-          }
-        ]
-      },
-      "1x2": {
-        "n": 5991,
-        "accuracy": 51.2,
-        "brier": 0.602,
-        "baseline": 44.8,
-        "baselineSide": "always home",
-        "calibration": [
-          {
-            "range": "33-50%",
-            "n": 3365,
-            "predicted": 43.6,
-            "actual": 43.6
-          },
-          {
-            "range": "50-60%",
-            "n": 1791,
-            "predicted": 54.3,
-            "actual": 56.1
-          },
-          {
-            "range": "60-70%",
-            "n": 668,
-            "predicted": 64.1,
-            "actual": 68.6
-          },
-          {
-            "range": "70-80%",
-            "n": 158,
-            "predicted": 73.3,
-            "actual": 86.1
-          },
-          {
-            "range": "80-90%",
-            "n": 9,
-            "predicted": 81.4,
-            "actual": 44.4
-          }
-        ]
-      },
-      "h1o05": {
-        "n": 5772,
-        "accuracy": 76.5,
-        "brier": 0.362,
-        "baseline": 76.5,
-        "baselineSide": "always yes",
-        "calibration": [
-          {
-            "range": "50-60%",
-            "n": 5,
-            "predicted": 59.4,
-            "actual": 40
-          },
-          {
-            "range": "60-70%",
-            "n": 1994,
-            "predicted": 67.5,
-            "actual": 72
-          },
-          {
-            "range": "70-80%",
-            "n": 3707,
-            "predicted": 73.4,
-            "actual": 78.6
-          },
-          {
-            "range": "80-90%",
-            "n": 66,
-            "predicted": 81.5,
-            "actual": 92.4
-          }
-        ]
-      },
-      "h1o15": {
-        "n": 5772,
-        "accuracy": 63.2,
-        "brier": 0.461,
-        "baseline": 63,
-        "baselineSide": "always no",
-        "calibration": [
-          {
-            "range": "50-60%",
-            "n": 1119,
-            "predicted": 57.1,
-            "actual": 57.6
-          },
-          {
-            "range": "60-70%",
-            "n": 4068,
-            "predicted": 64.9,
-            "actual": 63.5
-          },
-          {
-            "range": "70-80%",
-            "n": 585,
-            "predicted": 71.8,
-            "actual": 71.3
-          }
-        ]
-      }
-    },
-    "goals": {
-      "meanPredicted": 2.83,
-      "meanActual": 2.85,
-      "mae": 1.25,
-      "naiveMae": 1.26,
-      "exactTotal": 23.3,
-      "scope": [
-        {
-          "level": "high",
-          "n": 5991,
-          "atLeastOneGoal": 96.4
-        },
-        {
-          "level": "medium",
-          "n": 0,
-          "atLeastOneGoal": null
-        },
-        {
-          "level": "low",
-          "n": 0,
-          "atLeastOneGoal": null
-        }
-      ]
-    },
-    "halfTime": {
-      "n": 5772,
-      "anotherGoalAccuracy": 85,
-      "anotherGoalBaseline": 85,
-      "expectedMoreMean": 1.66,
-      "actualMoreMean": 1.64,
-      "mostLikelyMoreExact": 35.6,
-      "highScope": {
-        "n": 5367,
-        "gotAnotherGoal": 84.9
-      },
-      "calibration": [
-        {
-          "range": "65-75%",
-          "n": 405,
-          "predicted": 73.3,
-          "actual": 87.4
-        },
-        {
-          "range": "75-85%",
-          "n": 4709,
-          "predicted": 80.3,
-          "actual": 84.8
-        },
-        {
-          "range": "85-100%",
-          "n": 658,
-          "predicted": 86.6,
-          "actual": 85.7
-        }
-      ]
-    }
-  },
-  "testBeforeTuning": {
-    "data": {
-      "matches": 7475,
-      "seasons": "2024-25 to 2026-27",
-      "highConfidence": 5991,
-      "logLoss": 0.5856
-    },
-    "picks": {
-      "total": 6327,
-      "won": 4902,
-      "hitRate": 77.5,
-      "byMarket": {
-        "o15": {
-          "name": "Over 1.5 goals",
-          "picks": 3392,
-          "won": 2767,
-          "hitRate": 81.6,
-          "avgPredicted": 82,
-          "bySide": {
-            "Over 1.5": {
-              "n": 3392,
-              "won": 2767
-            }
-          }
-        },
-        "o25": {
-          "name": "Over 2.5 goals",
-          "picks": 225,
-          "won": 165,
-          "hitRate": 73.3,
-          "avgPredicted": 79.4,
-          "bySide": {
-            "Over 2.5": {
-              "n": 175,
-              "won": 135
-            },
-            "Under 2.5": {
-              "n": 50,
-              "won": 30
-            }
-          }
-        },
-        "btts": {
-          "name": "Both teams to score",
-          "picks": 36,
-          "won": 24,
-          "hitRate": 66.7,
-          "avgPredicted": 77.3,
-          "bySide": {
-            "BTTS: Yes": {
-              "n": 21,
-              "won": 12
-            },
-            "BTTS: No": {
-              "n": 15,
-              "won": 12
-            }
-          }
-        },
-        "1x2": {
-          "name": "Full-time result",
-          "picks": 1306,
-          "won": 876,
-          "hitRate": 67.1,
-          "avgPredicted": 81.6,
-          "bySide": {
-            "home": {
-              "n": 900,
-              "won": 616
-            },
-            "away": {
-              "n": 406,
-              "won": 260
-            }
-          }
-        },
-        "h1o05": {
-          "name": "1st half: Over 0.5 goals",
-          "picks": 906,
-          "won": 735,
-          "hitRate": 81.1,
-          "avgPredicted": 81,
-          "bySide": {
-            "1st half Over 0.5": {
-              "n": 906,
-              "won": 735
-            }
-          }
-        },
-        "h1o15": {
-          "name": "1st half: Over 1.5 goals",
-          "picks": 462,
-          "won": 335,
-          "hitRate": 72.5,
-          "avgPredicted": 78.1,
-          "bySide": {
-            "1st half Under 1.5": {
-              "n": 462,
-              "won": 335
-            }
-          }
-        }
-      }
-    },
-    "highConfidenceMarkets": {
-      "o15": {
-        "n": 5991,
-        "accuracy": 78.9,
-        "brier": 0.334,
-        "baseline": 79.1,
-        "baselineSide": "always yes",
-        "calibration": [
-          {
-            "range": "50-60%",
-            "n": 289,
-            "predicted": 56.2,
-            "actual": 64.4
-          },
-          {
-            "range": "60-70%",
-            "n": 1159,
-            "predicted": 66,
-            "actual": 74.8
-          },
-          {
-            "range": "70-80%",
-            "n": 2447,
-            "predicted": 75.3,
-            "actual": 78.4
-          },
-          {
-            "range": "80-90%",
-            "n": 1902,
-            "predicted": 84.2,
-            "actual": 83.1
-          },
-          {
-            "range": "90-100%",
-            "n": 194,
-            "predicted": 92.1,
-            "actual": 89.7
-          }
-        ]
-      },
-      "o25": {
-        "n": 5991,
-        "accuracy": 55.5,
-        "brier": 0.496,
-        "baseline": 54.6,
-        "baselineSide": "always yes",
-        "calibration": [
-          {
-            "range": "50-60%",
-            "n": 3438,
-            "predicted": 54.8,
-            "actual": 53
-          },
-          {
-            "range": "60-70%",
-            "n": 1926,
-            "predicted": 64.3,
-            "actual": 57
-          },
-          {
-            "range": "70-80%",
-            "n": 544,
-            "predicted": 73.5,
-            "actual": 63.1
-          },
-          {
-            "range": "80-90%",
-            "n": 80,
-            "predicted": 83.3,
-            "actual": 77.5
-          },
-          {
-            "range": "90-100%",
-            "n": 3,
+            "n": 1,
             "predicted": 90.7,
             "actual": 100
           }
         ]
       },
-      "btts": {
-        "n": 5991,
-        "accuracy": 53.5,
-        "brier": 0.499,
-        "baseline": 56.4,
+      "o25": {
+        "n": 6229,
+        "accuracy": 55.4,
+        "brier": 0.491,
+        "baseline": 53.2,
         "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
-            "n": 4215,
-            "predicted": 54.6,
-            "actual": 51.5
+            "n": 5478,
+            "predicted": 54.1,
+            "actual": 54.4
           },
           {
             "range": "60-70%",
-            "n": 1573,
-            "predicted": 63.7,
-            "actual": 57.9
+            "n": 719,
+            "predicted": 62.7,
+            "actual": 62.3
           },
           {
             "range": "70-80%",
-            "n": 202,
-            "predicted": 72.8,
-            "actual": 59.4
+            "n": 32,
+            "predicted": 71.7,
+            "actual": 78.1
+          }
+        ]
+      },
+      "btts": {
+        "n": 6229,
+        "accuracy": 54.9,
+        "brier": 0.493,
+        "baseline": 54.9,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 6010,
+            "predicted": 53.6,
+            "actual": 54.7
           },
           {
-            "range": "80-90%",
-            "n": 1,
-            "predicted": 80.1,
-            "actual": 100
+            "range": "60-70%",
+            "n": 219,
+            "predicted": 61.5,
+            "actual": 59.8
           }
         ]
       },
       "1x2": {
-        "n": 5991,
-        "accuracy": 51,
-        "brier": 0.617,
-        "baseline": 44.8,
+        "n": 6229,
+        "accuracy": 50.5,
+        "brier": 0.603,
+        "baseline": 43.6,
         "baselineSide": "always home",
         "calibration": [
           {
             "range": "33-50%",
-            "n": 1850,
-            "predicted": 43.1,
-            "actual": 40.1
+            "n": 3458,
+            "predicted": 42.6,
+            "actual": 42.8
           },
           {
             "range": "50-60%",
-            "n": 1313,
-            "predicted": 54.9,
-            "actual": 45.3
+            "n": 1583,
+            "predicted": 54.6,
+            "actual": 52.6
           },
           {
             "range": "60-70%",
-            "n": 1069,
-            "predicted": 64.9,
-            "actual": 52.4
+            "n": 812,
+            "predicted": 64.2,
+            "actual": 66.3
           },
           {
             "range": "70-80%",
-            "n": 935,
-            "predicted": 74.7,
-            "actual": 59.3
+            "n": 325,
+            "predicted": 74.1,
+            "actual": 77.2
           },
           {
             "range": "80-90%",
-            "n": 611,
-            "predicted": 84.7,
-            "actual": 70.5
-          },
-          {
-            "range": "90-100%",
-            "n": 213,
-            "predicted": 93.1,
-            "actual": 80.8
+            "n": 51,
+            "predicted": 83,
+            "actual": 84.3
           }
         ]
       },
       "h1o05": {
-        "n": 5772,
-        "accuracy": 76.5,
-        "brier": 0.365,
-        "baseline": 76.5,
+        "n": 6226,
+        "accuracy": 71.7,
+        "brier": 0.402,
+        "baseline": 71.7,
         "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
-            "n": 286,
-            "predicted": 56.9,
-            "actual": 66.4
+            "n": 24,
+            "predicted": 59.1,
+            "actual": 50
           },
           {
             "range": "60-70%",
-            "n": 2062,
-            "predicted": 66.1,
-            "actual": 74.2
+            "n": 2827,
+            "predicted": 66.9,
+            "actual": 67.5
           },
           {
             "range": "70-80%",
-            "n": 2907,
-            "predicted": 74.4,
-            "actual": 78.2
+            "n": 3302,
+            "predicted": 73.3,
+            "actual": 75.1
           },
           {
             "range": "80-90%",
-            "n": 511,
-            "predicted": 82.5,
-            "actual": 80.8
-          },
-          {
-            "range": "90-100%",
-            "n": 6,
-            "predicted": 90.9,
-            "actual": 100
+            "n": 73,
+            "predicted": 81.6,
+            "actual": 90.4
           }
         ]
       },
       "h1o15": {
-        "n": 5772,
-        "accuracy": 62.8,
-        "brier": 0.464,
-        "baseline": 63,
+        "n": 6226,
+        "accuracy": 65.5,
+        "brier": 0.448,
+        "baseline": 65.3,
         "baselineSide": "always no",
         "calibration": [
           {
             "range": "50-60%",
-            "n": 1788,
-            "predicted": 55.5,
-            "actual": 57.3
+            "n": 951,
+            "predicted": 57,
+            "actual": 58.5
           },
           {
             "range": "60-70%",
-            "n": 2617,
-            "predicted": 65,
-            "actual": 62.4
+            "n": 4145,
+            "predicted": 65.3,
+            "actual": 65.1
           },
           {
             "range": "70-80%",
-            "n": 1272,
-            "predicted": 73.6,
-            "actual": 70.2
-          },
-          {
-            "range": "80-90%",
-            "n": 95,
-            "predicted": 82.3,
-            "actual": 76.8
+            "n": 1130,
+            "predicted": 72.2,
+            "actual": 72.7
           }
         ]
       }
     },
     "goals": {
-      "meanPredicted": 2.83,
-      "meanActual": 2.85,
-      "mae": 1.27,
-      "naiveMae": 1.26,
-      "exactTotal": 21.8,
+      "meanPredicted": 2.76,
+      "meanActual": 2.77,
+      "mae": 1.29,
+      "naiveMae": 1.31,
+      "exactTotal": 23.1,
       "scope": [
         {
           "level": "high",
-          "n": 5986,
-          "atLeastOneGoal": 96.4
+          "n": 6229,
+          "atLeastOneGoal": 93.7
         },
         {
           "level": "medium",
-          "n": 5,
-          "atLeastOneGoal": 60
+          "n": 0,
+          "atLeastOneGoal": null
         },
         {
           "level": "low",
@@ -719,55 +363,377 @@
       ]
     },
     "halfTime": {
-      "n": 5772,
-      "anotherGoalAccuracy": 85,
-      "anotherGoalBaseline": 85,
-      "expectedMoreMean": 1.58,
-      "actualMoreMean": 1.64,
-      "mostLikelyMoreExact": 35.5,
+      "n": 6226,
+      "anotherGoalAccuracy": 79.7,
+      "anotherGoalBaseline": 79.7,
+      "expectedMoreMean": 1.61,
+      "actualMoreMean": 1.54,
+      "mostLikelyMoreExact": 33.3,
       "highScope": {
-        "n": 4246,
-        "gotAnotherGoal": 85.4
+        "n": 5368,
+        "gotAnotherGoal": 80.5
       },
       "calibration": [
         {
-          "range": "50-65%",
-          "n": 124,
-          "predicted": 61.8,
-          "actual": 81.5
-        },
-        {
           "range": "65-75%",
-          "n": 1401,
-          "predicted": 71.5,
-          "actual": 84.4
+          "n": 858,
+          "predicted": 73.1,
+          "actual": 75.1
         },
         {
           "range": "75-85%",
-          "n": 3400,
+          "n": 4820,
           "predicted": 79.9,
-          "actual": 84.9
+          "actual": 80
         },
         {
           "range": "85-100%",
-          "n": 846,
-          "predicted": 87.4,
-          "actual": 87.4
+          "n": 548,
+          "predicted": 86.7,
+          "actual": 84.3
         }
       ]
     }
   },
-  "train": {
+  "testPrevious": {
+    "data": {
+      "matches": 7700,
+      "seasons": "2024-25 to 2026-27",
+      "highConfidence": 6229,
+      "logLoss": 0.6024
+    },
+    "picks": {
+      "total": 1595,
+      "won": 1329,
+      "hitRate": 83.3,
+      "byMarket": {
+        "o15": {
+          "name": "Over 1.5 goals",
+          "picks": 1300,
+          "won": 1083,
+          "hitRate": 83.3,
+          "avgPredicted": 82.9,
+          "bySide": {
+            "Over 1.5": {
+              "n": 1300,
+              "won": 1083
+            }
+          }
+        },
+        "o25": {
+          "name": "Over 2.5 goals",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
+        },
+        "btts": {
+          "name": "Both teams to score",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
+        },
+        "1x2": {
+          "name": "Full-time result",
+          "picks": 105,
+          "won": 85,
+          "hitRate": 81,
+          "avgPredicted": 74.6,
+          "bySide": {
+            "home": {
+              "n": 105,
+              "won": 85
+            }
+          }
+        },
+        "h1o05": {
+          "name": "1st half: Over 0.5 goals",
+          "picks": 190,
+          "won": 161,
+          "hitRate": 84.7,
+          "avgPredicted": 79.6,
+          "bySide": {
+            "1st half Over 0.5": {
+              "n": 190,
+              "won": 161
+            }
+          }
+        },
+        "h1o15": {
+          "name": "1st half: Over 1.5 goals",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
+        }
+      }
+    },
+    "highConfidenceMarkets": {
+      "o15": {
+        "n": 6229,
+        "accuracy": 76.9,
+        "brier": 0.352,
+        "baseline": 76.9,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 7,
+            "predicted": 59.6,
+            "actual": 28.6
+          },
+          {
+            "range": "60-70%",
+            "n": 867,
+            "predicted": 67.5,
+            "actual": 71.3
+          },
+          {
+            "range": "70-80%",
+            "n": 4046,
+            "predicted": 75.2,
+            "actual": 76.2
+          },
+          {
+            "range": "80-90%",
+            "n": 1295,
+            "predicted": 82.8,
+            "actual": 82.9
+          },
+          {
+            "range": "90-100%",
+            "n": 14,
+            "predicted": 90.7,
+            "actual": 100
+          }
+        ]
+      },
+      "o25": {
+        "n": 6229,
+        "accuracy": 55.4,
+        "brier": 0.492,
+        "baseline": 53.2,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 5133,
+            "predicted": 54.3,
+            "actual": 54.2
+          },
+          {
+            "range": "60-70%",
+            "n": 1044,
+            "predicted": 63.1,
+            "actual": 60.6
+          },
+          {
+            "range": "70-80%",
+            "n": 52,
+            "predicted": 73.3,
+            "actual": 76.9
+          }
+        ]
+      },
+      "btts": {
+        "n": 6229,
+        "accuracy": 54.7,
+        "brier": 0.494,
+        "baseline": 54.9,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 5136,
+            "predicted": 54.3,
+            "actual": 53.5
+          },
+          {
+            "range": "60-70%",
+            "n": 1062,
+            "predicted": 63.1,
+            "actual": 60.7
+          },
+          {
+            "range": "70-80%",
+            "n": 31,
+            "predicted": 72,
+            "actual": 54.8
+          }
+        ]
+      },
+      "1x2": {
+        "n": 6229,
+        "accuracy": 49.9,
+        "brier": 0.609,
+        "baseline": 43.6,
+        "baselineSide": "always home",
+        "calibration": [
+          {
+            "range": "33-50%",
+            "n": 3596,
+            "predicted": 43.4,
+            "actual": 42.4
+          },
+          {
+            "range": "50-60%",
+            "n": 1819,
+            "predicted": 54.3,
+            "actual": 55.2
+          },
+          {
+            "range": "60-70%",
+            "n": 653,
+            "predicted": 64,
+            "actual": 68.6
+          },
+          {
+            "range": "70-80%",
+            "n": 154,
+            "predicted": 73.3,
+            "actual": 83.8
+          },
+          {
+            "range": "80-90%",
+            "n": 7,
+            "predicted": 81.8,
+            "actual": 42.9
+          }
+        ]
+      },
+      "h1o05": {
+        "n": 6226,
+        "accuracy": 71.7,
+        "brier": 0.402,
+        "baseline": 71.7,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 11,
+            "predicted": 59.3,
+            "actual": 36.4
+          },
+          {
+            "range": "60-70%",
+            "n": 2847,
+            "predicted": 67.1,
+            "actual": 67.6
+          },
+          {
+            "range": "70-80%",
+            "n": 3316,
+            "predicted": 73.2,
+            "actual": 75.2
+          },
+          {
+            "range": "80-90%",
+            "n": 52,
+            "predicted": 81.6,
+            "actual": 86.5
+          }
+        ]
+      },
+      "h1o15": {
+        "n": 6226,
+        "accuracy": 65.5,
+        "brier": 0.448,
+        "baseline": 65.3,
+        "baselineSide": "always no",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 891,
+            "predicted": 57.1,
+            "actual": 58.5
+          },
+          {
+            "range": "60-70%",
+            "n": 4267,
+            "predicted": 65.3,
+            "actual": 65.2
+          },
+          {
+            "range": "70-80%",
+            "n": 1068,
+            "predicted": 71.9,
+            "actual": 72.3
+          }
+        ]
+      }
+    },
+    "goals": {
+      "meanPredicted": 2.76,
+      "meanActual": 2.77,
+      "mae": 1.29,
+      "naiveMae": 1.31,
+      "exactTotal": 23.1,
+      "scope": [
+        {
+          "level": "high",
+          "n": 6229,
+          "atLeastOneGoal": 93.7
+        },
+        {
+          "level": "medium",
+          "n": 0,
+          "atLeastOneGoal": null
+        },
+        {
+          "level": "low",
+          "n": 0,
+          "atLeastOneGoal": null
+        }
+      ]
+    },
+    "halfTime": {
+      "n": 6226,
+      "anotherGoalAccuracy": 79.7,
+      "anotherGoalBaseline": 79.7,
+      "expectedMoreMean": 1.61,
+      "actualMoreMean": 1.54,
+      "mostLikelyMoreExact": 33.3,
+      "highScope": {
+        "n": 5454,
+        "gotAnotherGoal": 80.3
+      },
+      "calibration": [
+        {
+          "range": "65-75%",
+          "n": 772,
+          "predicted": 73.2,
+          "actual": 76
+        },
+        {
+          "range": "75-85%",
+          "n": 4939,
+          "predicted": 79.8,
+          "actual": 79.8
+        },
+        {
+          "range": "85-100%",
+          "n": 515,
+          "predicted": 86.6,
+          "actual": 84.3
+        }
+      ]
+    }
+  },
+  "trainPrevious": {
     "data": {
       "matches": 17356,
       "seasons": "2019-20 to 2023-24",
       "highConfidence": 14943,
-      "logLoss": 0.5889
+      "logLoss": 0.604
     },
     "picks": {
-      "total": 4648,
+      "total": 4666,
       "won": 3840,
-      "hitRate": 82.6,
+      "hitRate": 82.3,
       "byMarket": {
         "o15": {
           "name": "Over 1.5 goals",
@@ -813,13 +779,13 @@
         },
         "h1o05": {
           "name": "1st half: Over 0.5 goals",
-          "picks": 543,
+          "picks": 561,
           "won": 444,
-          "hitRate": 81.8,
+          "hitRate": 79.1,
           "avgPredicted": 79.3,
           "bySide": {
             "1st half Over 0.5": {
-              "n": 543,
+              "n": 561,
               "won": 444
             }
           }
@@ -968,62 +934,68 @@
         ]
       },
       "h1o05": {
-        "n": 13950,
-        "accuracy": 75.8,
-        "brier": 0.372,
-        "baseline": 75.8,
+        "n": 14943,
+        "accuracy": 70.8,
+        "brier": 0.412,
+        "baseline": 70.8,
         "baselineSide": "always yes",
         "calibration": [
           {
             "range": "50-60%",
-            "n": 113,
+            "n": 123,
             "predicted": 58.8,
-            "actual": 76.1
+            "actual": 69.9
           },
           {
             "range": "60-70%",
-            "n": 6109,
-            "predicted": 66.8,
-            "actual": 73.8
+            "n": 6636,
+            "predicted": 66.7,
+            "actual": 67.9
           },
           {
             "range": "70-80%",
-            "n": 7612,
-            "predicted": 73.7,
-            "actual": 77.4
+            "n": 8059,
+            "predicted": 73.6,
+            "actual": 73.1
           },
           {
             "range": "80-90%",
-            "n": 116,
-            "predicted": 81.1,
-            "actual": 79.3
+            "n": 125,
+            "predicted": 81,
+            "actual": 73.6
           }
         ]
       },
       "h1o15": {
-        "n": 13950,
-        "accuracy": 62.6,
-        "brier": 0.467,
-        "baseline": 62.6,
+        "n": 14943,
+        "accuracy": 65.1,
+        "brier": 0.452,
+        "baseline": 65.1,
         "baselineSide": "always no",
         "calibration": [
           {
             "range": "50-60%",
-            "n": 2508,
+            "n": 2632,
             "predicted": 57,
-            "actual": 57.6
+            "actual": 59.4
           },
           {
             "range": "60-70%",
-            "n": 8731,
+            "n": 9358,
             "predicted": 65.2,
-            "actual": 62.8
+            "actual": 65.3
           },
           {
             "range": "70-80%",
-            "n": 2711,
+            "n": 2952,
             "predicted": 72.4,
-            "actual": 66.9
+            "actual": 69.6
+          },
+          {
+            "range": "80-90%",
+            "n": 1,
+            "predicted": 80.5,
+            "actual": 100
           }
         ]
       }
@@ -1053,40 +1025,781 @@
       ]
     },
     "halfTime": {
-      "n": 13950,
-      "anotherGoalAccuracy": 85.2,
-      "anotherGoalBaseline": 85.2,
-      "expectedMoreMean": 1.62,
-      "actualMoreMean": 1.64,
-      "mostLikelyMoreExact": 36,
+      "n": 14943,
+      "anotherGoalAccuracy": 79.6,
+      "anotherGoalBaseline": 79.6,
+      "expectedMoreMean": 1.61,
+      "actualMoreMean": 1.53,
+      "mostLikelyMoreExact": 33.6,
       "highScope": {
-        "n": 12033,
-        "gotAnotherGoal": 85
+        "n": 12744,
+        "gotAnotherGoal": 80.3
       },
       "calibration": [
         {
           "range": "50-65%",
-          "n": 2,
-          "predicted": 64.8,
-          "actual": 100
+          "n": 3,
+          "predicted": 64.4,
+          "actual": 66.7
         },
         {
           "range": "65-75%",
-          "n": 1915,
-          "predicted": 72.9,
-          "actual": 86.6
+          "n": 2196,
+          "predicted": 72.8,
+          "actual": 75.5
         },
         {
           "range": "75-85%",
-          "n": 10504,
-          "predicted": 80,
-          "actual": 84.6
+          "n": 11197,
+          "predicted": 79.9,
+          "actual": 79.3
         },
         {
           "range": "85-100%",
-          "n": 1529,
+          "n": 1547,
           "predicted": 86.5,
-          "actual": 88
+          "actual": 87
+        }
+      ]
+    }
+  },
+  "testBeforeTuning": {
+    "data": {
+      "matches": 7700,
+      "seasons": "2024-25 to 2026-27",
+      "highConfidence": 6229,
+      "logLoss": 0.6106
+    },
+    "picks": {
+      "total": 4604,
+      "won": 3633,
+      "hitRate": 78.9,
+      "byMarket": {
+        "o15": {
+          "name": "Over 1.5 goals",
+          "picks": 3162,
+          "won": 2520,
+          "hitRate": 79.7,
+          "avgPredicted": 81.9,
+          "bySide": {
+            "Over 1.5": {
+              "n": 3162,
+              "won": 2520
+            }
+          }
+        },
+        "o25": {
+          "name": "Over 2.5 goals",
+          "picks": 230,
+          "won": 161,
+          "hitRate": 70,
+          "avgPredicted": 79.4,
+          "bySide": {
+            "Over 2.5": {
+              "n": 159,
+              "won": 122
+            },
+            "Under 2.5": {
+              "n": 71,
+              "won": 39
+            }
+          }
+        },
+        "btts": {
+          "name": "Both teams to score",
+          "picks": 40,
+          "won": 26,
+          "hitRate": 65,
+          "avgPredicted": 77.1,
+          "bySide": {
+            "BTTS: Yes": {
+              "n": 21,
+              "won": 13
+            },
+            "BTTS: No": {
+              "n": 19,
+              "won": 13
+            }
+          }
+        },
+        "1x2": {
+          "name": "Full-time result",
+          "picks": 313,
+          "won": 242,
+          "hitRate": 77.3,
+          "avgPredicted": 80.8,
+          "bySide": {
+            "home": {
+              "n": 243,
+              "won": 196
+            },
+            "away": {
+              "n": 70,
+              "won": 46
+            }
+          }
+        },
+        "h1o05": {
+          "name": "1st half: Over 0.5 goals",
+          "picks": 840,
+          "won": 666,
+          "hitRate": 79.3,
+          "avgPredicted": 81,
+          "bySide": {
+            "1st half Over 0.5": {
+              "n": 840,
+              "won": 666
+            }
+          }
+        },
+        "h1o15": {
+          "name": "1st half: Over 1.5 goals",
+          "picks": 19,
+          "won": 18,
+          "hitRate": 94.7,
+          "avgPredicted": 86.5,
+          "bySide": {
+            "1st half Under 1.5": {
+              "n": 19,
+              "won": 18
+            }
+          }
+        }
+      }
+    },
+    "highConfidenceMarkets": {
+      "o15": {
+        "n": 6229,
+        "accuracy": 76.6,
+        "brier": 0.359,
+        "baseline": 76.9,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 403,
+            "predicted": 56.1,
+            "actual": 64.3
+          },
+          {
+            "range": "60-70%",
+            "n": 1413,
+            "predicted": 65.8,
+            "actual": 73.4
+          },
+          {
+            "range": "70-80%",
+            "n": 2513,
+            "predicted": 75.1,
+            "actual": 76.4
+          },
+          {
+            "range": "80-90%",
+            "n": 1719,
+            "predicted": 84.1,
+            "actual": 81.3
+          },
+          {
+            "range": "90-100%",
+            "n": 181,
+            "predicted": 92.2,
+            "actual": 87.8
+          }
+        ]
+      },
+      "o25": {
+        "n": 6229,
+        "accuracy": 54.7,
+        "brier": 0.501,
+        "baseline": 53.2,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 3560,
+            "predicted": 54.8,
+            "actual": 52.8
+          },
+          {
+            "range": "60-70%",
+            "n": 2014,
+            "predicted": 64.3,
+            "actual": 55.5
+          },
+          {
+            "range": "70-80%",
+            "n": 573,
+            "predicted": 73.5,
+            "actual": 60.7
+          },
+          {
+            "range": "80-90%",
+            "n": 79,
+            "predicted": 83.4,
+            "actual": 75.9
+          },
+          {
+            "range": "90-100%",
+            "n": 3,
+            "predicted": 90.9,
+            "actual": 100
+          }
+        ]
+      },
+      "btts": {
+        "n": 6229,
+        "accuracy": 52.3,
+        "brier": 0.504,
+        "baseline": 54.9,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 4398,
+            "predicted": 54.6,
+            "actual": 50.7
+          },
+          {
+            "range": "60-70%",
+            "n": 1626,
+            "predicted": 63.8,
+            "actual": 55.7
+          },
+          {
+            "range": "70-80%",
+            "n": 204,
+            "predicted": 72.9,
+            "actual": 58.8
+          },
+          {
+            "range": "80-90%",
+            "n": 1,
+            "predicted": 80.1,
+            "actual": 100
+          }
+        ]
+      },
+      "1x2": {
+        "n": 6229,
+        "accuracy": 49.8,
+        "brier": 0.608,
+        "baseline": 43.6,
+        "baselineSide": "always home",
+        "calibration": [
+          {
+            "range": "33-50%",
+            "n": 3175,
+            "predicted": 42.9,
+            "actual": 40.9
+          },
+          {
+            "range": "50-60%",
+            "n": 1548,
+            "predicted": 54.6,
+            "actual": 52
+          },
+          {
+            "range": "60-70%",
+            "n": 905,
+            "predicted": 64.3,
+            "actual": 59.2
+          },
+          {
+            "range": "70-80%",
+            "n": 433,
+            "predicted": 74.4,
+            "actual": 74.6
+          },
+          {
+            "range": "80-90%",
+            "n": 155,
+            "predicted": 83.7,
+            "actual": 80
+          },
+          {
+            "range": "90-100%",
+            "n": 13,
+            "predicted": 92.3,
+            "actual": 84.6
+          }
+        ]
+      },
+      "h1o05": {
+        "n": 6226,
+        "accuracy": 71.8,
+        "brier": 0.404,
+        "baseline": 71.7,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 437,
+            "predicted": 56.9,
+            "actual": 63.6
+          },
+          {
+            "range": "60-70%",
+            "n": 2504,
+            "predicted": 65.9,
+            "actual": 68.7
+          },
+          {
+            "range": "70-80%",
+            "n": 2815,
+            "predicted": 74.3,
+            "actual": 74.5
+          },
+          {
+            "range": "80-90%",
+            "n": 464,
+            "predicted": 82.5,
+            "actual": 79.3
+          },
+          {
+            "range": "90-100%",
+            "n": 6,
+            "predicted": 91.1,
+            "actual": 100
+          }
+        ]
+      },
+      "h1o15": {
+        "n": 6226,
+        "accuracy": 65.2,
+        "brier": 0.45,
+        "baseline": 65.3,
+        "baselineSide": "always no",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 1638,
+            "predicted": 55.5,
+            "actual": 59.4
+          },
+          {
+            "range": "60-70%",
+            "n": 2774,
+            "predicted": 65.2,
+            "actual": 64.4
+          },
+          {
+            "range": "70-80%",
+            "n": 1672,
+            "predicted": 73.8,
+            "actual": 71.2
+          },
+          {
+            "range": "80-90%",
+            "n": 142,
+            "predicted": 82.4,
+            "actual": 76.1
+          }
+        ]
+      }
+    },
+    "goals": {
+      "meanPredicted": 2.76,
+      "meanActual": 2.77,
+      "mae": 1.31,
+      "naiveMae": 1.31,
+      "exactTotal": 21.4,
+      "scope": [
+        {
+          "level": "high",
+          "n": 6223,
+          "atLeastOneGoal": 93.8
+        },
+        {
+          "level": "medium",
+          "n": 6,
+          "atLeastOneGoal": 66.7
+        },
+        {
+          "level": "low",
+          "n": 0,
+          "atLeastOneGoal": null
+        }
+      ]
+    },
+    "halfTime": {
+      "n": 6226,
+      "anotherGoalAccuracy": 79.7,
+      "anotherGoalBaseline": 79.7,
+      "expectedMoreMean": 1.54,
+      "actualMoreMean": 1.54,
+      "mostLikelyMoreExact": 33.3,
+      "highScope": {
+        "n": 4195,
+        "gotAnotherGoal": 80.8
+      },
+      "calibration": [
+        {
+          "range": "50-65%",
+          "n": 203,
+          "predicted": 62,
+          "actual": 74.9
+        },
+        {
+          "range": "65-75%",
+          "n": 1826,
+          "predicted": 71.4,
+          "actual": 77.8
+        },
+        {
+          "range": "75-85%",
+          "n": 3430,
+          "predicted": 79.8,
+          "actual": 79.7
+        },
+        {
+          "range": "85-100%",
+          "n": 765,
+          "predicted": 87.5,
+          "actual": 85.9
+        }
+      ]
+    }
+  },
+  "train": {
+    "data": {
+      "matches": 17356,
+      "seasons": "2019-20 to 2023-24",
+      "highConfidence": 14943,
+      "logLoss": 0.6033
+    },
+    "picks": {
+      "total": 4677,
+      "won": 3863,
+      "hitRate": 82.6,
+      "byMarket": {
+        "o15": {
+          "name": "Over 1.5 goals",
+          "picks": 3594,
+          "won": 2992,
+          "hitRate": 83.2,
+          "avgPredicted": 82.4,
+          "bySide": {
+            "Over 1.5": {
+              "n": 3594,
+              "won": 2992
+            }
+          }
+        },
+        "o25": {
+          "name": "Over 2.5 goals",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
+        },
+        "btts": {
+          "name": "Both teams to score",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
+        },
+        "1x2": {
+          "name": "Full-time result",
+          "picks": 398,
+          "won": 328,
+          "hitRate": 82.4,
+          "avgPredicted": 79.2,
+          "bySide": {
+            "home": {
+              "n": 370,
+              "won": 310
+            },
+            "away": {
+              "n": 28,
+              "won": 18
+            }
+          }
+        },
+        "h1o05": {
+          "name": "1st half: Over 0.5 goals",
+          "picks": 685,
+          "won": 543,
+          "hitRate": 79.3,
+          "avgPredicted": 79.4,
+          "bySide": {
+            "1st half Over 0.5": {
+              "n": 685,
+              "won": 543
+            }
+          }
+        },
+        "h1o15": {
+          "name": "1st half: Over 1.5 goals",
+          "picks": 0,
+          "won": 0,
+          "hitRate": null,
+          "avgPredicted": 0,
+          "bySide": {}
+        }
+      }
+    },
+    "highConfidenceMarkets": {
+      "o15": {
+        "n": 14943,
+        "accuracy": 76.4,
+        "brier": 0.356,
+        "baseline": 76.4,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 1,
+            "predicted": 59,
+            "actual": 0
+          },
+          {
+            "range": "60-70%",
+            "n": 1318,
+            "predicted": 67.7,
+            "actual": 70.7
+          },
+          {
+            "range": "70-80%",
+            "n": 10016,
+            "predicted": 75.4,
+            "actual": 74.8
+          },
+          {
+            "range": "80-90%",
+            "n": 3607,
+            "predicted": 82.4,
+            "actual": 83.2
+          },
+          {
+            "range": "90-100%",
+            "n": 1,
+            "predicted": 90.7,
+            "actual": 100
+          }
+        ]
+      },
+      "o25": {
+        "n": 14943,
+        "accuracy": 56.2,
+        "brier": 0.49,
+        "baseline": 52.4,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 12510,
+            "predicted": 54.3,
+            "actual": 55
+          },
+          {
+            "range": "60-70%",
+            "n": 2391,
+            "predicted": 62.9,
+            "actual": 62
+          },
+          {
+            "range": "70-80%",
+            "n": 42,
+            "predicted": 71.4,
+            "actual": 76.2
+          }
+        ]
+      },
+      "btts": {
+        "n": 14943,
+        "accuracy": 54.2,
+        "brier": 0.495,
+        "baseline": 53.3,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 14313,
+            "predicted": 53.8,
+            "actual": 53.9
+          },
+          {
+            "range": "60-70%",
+            "n": 630,
+            "predicted": 61.3,
+            "actual": 59.5
+          }
+        ]
+      },
+      "1x2": {
+        "n": 14943,
+        "accuracy": 50.4,
+        "brier": 0.603,
+        "baseline": 43.1,
+        "baselineSide": "always home",
+        "calibration": [
+          {
+            "range": "33-50%",
+            "n": 8179,
+            "predicted": 42.6,
+            "actual": 41.7
+          },
+          {
+            "range": "50-60%",
+            "n": 3739,
+            "predicted": 54.6,
+            "actual": 54.4
+          },
+          {
+            "range": "60-70%",
+            "n": 2081,
+            "predicted": 64.5,
+            "actual": 65.2
+          },
+          {
+            "range": "70-80%",
+            "n": 799,
+            "predicted": 74.1,
+            "actual": 75
+          },
+          {
+            "range": "80-90%",
+            "n": 144,
+            "predicted": 82.6,
+            "actual": 88.2
+          },
+          {
+            "range": "90-100%",
+            "n": 1,
+            "predicted": 90.9,
+            "actual": 100
+          }
+        ]
+      },
+      "h1o05": {
+        "n": 14943,
+        "accuracy": 70.8,
+        "brier": 0.412,
+        "baseline": 70.8,
+        "baselineSide": "always yes",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 167,
+            "predicted": 58.6,
+            "actual": 71.3
+          },
+          {
+            "range": "60-70%",
+            "n": 6631,
+            "predicted": 66.7,
+            "actual": 68
+          },
+          {
+            "range": "70-80%",
+            "n": 7969,
+            "predicted": 73.7,
+            "actual": 73.1
+          },
+          {
+            "range": "80-90%",
+            "n": 176,
+            "predicted": 81.1,
+            "actual": 73.3
+          }
+        ]
+      },
+      "h1o15": {
+        "n": 14943,
+        "accuracy": 65,
+        "brier": 0.452,
+        "baseline": 65.1,
+        "baselineSide": "always no",
+        "calibration": [
+          {
+            "range": "50-60%",
+            "n": 2758,
+            "predicted": 56.9,
+            "actual": 59.2
+          },
+          {
+            "range": "60-70%",
+            "n": 9072,
+            "predicted": 65.2,
+            "actual": 65.2
+          },
+          {
+            "range": "70-80%",
+            "n": 3106,
+            "predicted": 72.5,
+            "actual": 69.8
+          },
+          {
+            "range": "80-90%",
+            "n": 7,
+            "predicted": 80.6,
+            "actual": 57.1
+          }
+        ]
+      }
+    },
+    "goals": {
+      "meanPredicted": 2.77,
+      "meanActual": 2.76,
+      "mae": 1.31,
+      "naiveMae": 1.33,
+      "exactTotal": 22.7,
+      "scope": [
+        {
+          "level": "high",
+          "n": 14943,
+          "atLeastOneGoal": 93.4
+        },
+        {
+          "level": "medium",
+          "n": 0,
+          "atLeastOneGoal": null
+        },
+        {
+          "level": "low",
+          "n": 0,
+          "atLeastOneGoal": null
+        }
+      ]
+    },
+    "halfTime": {
+      "n": 14943,
+      "anotherGoalAccuracy": 79.6,
+      "anotherGoalBaseline": 79.6,
+      "expectedMoreMean": 1.61,
+      "actualMoreMean": 1.53,
+      "mostLikelyMoreExact": 33.7,
+      "highScope": {
+        "n": 12597,
+        "gotAnotherGoal": 80.4
+      },
+      "calibration": [
+        {
+          "range": "50-65%",
+          "n": 11,
+          "predicted": 64.2,
+          "actual": 63.6
+        },
+        {
+          "range": "65-75%",
+          "n": 2335,
+          "predicted": 72.7,
+          "actual": 75.4
+        },
+        {
+          "range": "75-85%",
+          "n": 10968,
+          "predicted": 80,
+          "actual": 79.4
+        },
+        {
+          "range": "85-100%",
+          "n": 1629,
+          "predicted": 86.6,
+          "actual": 87
         }
       ]
     }

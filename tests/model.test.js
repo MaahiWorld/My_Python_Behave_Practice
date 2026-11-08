@@ -241,3 +241,59 @@ test('first-half goal chances, pre-match and live', async () => {
   assert.ok(Math.abs(o.homeWin + o.draw + o.awayWin - 1) < 1e-9);
   assert.ok(o.homeWin > o.awayWin, 'home advantage');
 });
+
+test('league points per game sharpen the result but not goal totals', async () => {
+  const { predict: pr, ppgEdge } = await import('../js/model.js');
+  const T2 = (id) => ({ id, name: id, short: id, abbr: id, score: 0 });
+  const m = { id: '1', league: 'x', state: 'pre', minute: 0, home: T2('h'), away: T2('a') };
+  const row = (pts) => ({ gp: 10, gf: 14, ga: 14, pts });
+  const level = pr(m, { table: { home: row(15), away: row(15) } });
+  const strong = pr(m, { table: { home: row(25), away: row(8) } });
+  assert.equal(ppgEdge({ table: { home: row(15), away: row(15) } }), 0);
+  assert.ok(strong.outcome.homeWin > level.outcome.homeWin + 0.1, 'better points record wins more often');
+  assert.ok(Math.abs(strong.expectedFinalTotal - level.expectedFinalTotal) < 1e-9, 'goal totals unchanged');
+  assert.ok(Math.abs(strong.over25 - level.over25) < 1e-9);
+  // No table: points per game from recent form, at its own (smaller) weight.
+  const f = (res) => Array.from({ length: 5 }, () => ({ gf: 1, ga: 1, res }));
+  assert.ok(ppgEdge({ form: { home: f('W'), away: f('L') } }) > 0);
+  assert.equal(ppgEdge({ form: { home: f('W'), away: f('L').slice(0, 3) } }), 0, 'needs 4+ matches each');
+});
+
+test('market calibration applies before kick-off only', async () => {
+  const { predict: pr, calibrate, PARAMS: P } = await import('../js/model.js');
+  const T2 = (id, score = 0) => ({ id, name: id, short: id, abbr: id, score });
+  const base = { id: '1', league: 'x', home: T2('h'), away: T2('a') };
+  const saved = P.calib;
+  try {
+    P.calib = {};
+    const rawPre = pr({ ...base, state: 'pre', minute: 0 });
+    const rawLive = pr({ ...base, state: 'in', minute: 20, phase: 'H1' });
+    P.calib = saved;
+    const pre = pr({ ...base, state: 'pre', minute: 0 });
+    const live = pr({ ...base, state: 'in', minute: 20, phase: 'H1' });
+    assert.equal(pre.btts, calibrate('btts', rawPre.btts));
+    assert.notEqual(pre.btts, rawPre.btts);
+    assert.equal(live.btts, rawLive.btts);
+    assert.equal(calibrate('none', 0.7), 0.7);
+  } finally { P.calib = saved; }
+});
+
+test('backtest loader reads goalless draws in both openfootball formats', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { loadContexts } = await import('../backtest/lib.js');
+  const dir = mkdtempSync(join(tmpdir(), 'gs-'));
+  try {
+    writeFileSync(join(dir, '2025-26.en.1.json'), JSON.stringify({ matches: [
+      { date: '2025-08-15', team1: 'A', team2: 'B', score: { ft: [2, 1], ht: [1, 0] } },
+      { date: '2025-08-16', team1: 'C', team2: 'D', score: [0, 0] },
+      { date: '2025-08-17', team1: 'E', team2: 'F', score: { ft: [0, 0] } },
+      { date: '2025-08-18', team1: 'G', team2: 'H' },
+    ] }));
+    const rows = loadContexts(dir);
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.map((r) => r.m.ht), [[1, 0], [0, 0], [0, 0]]);
+    assert.equal(rows[0].match.league, 'eng.1');
+  } finally { rmSync(dir, { recursive: true }); }
+});

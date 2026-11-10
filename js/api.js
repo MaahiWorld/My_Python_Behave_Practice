@@ -390,22 +390,74 @@ export async function fetchUpcoming({ proxy, days = 7 } = {}) {
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+// League standings, cached for an hour. A failed or empty fetch is only remembered for 5 minutes,
+// so one refused request (ESPN rejects bursts) doesn't leave every match in that league without a table.
+const standingsCache = new Map();
+export async function leagueStandings(league, proxy) {
+  const hit = standingsCache.get(league);
+  if (hit && Date.now() - hit.t < (Object.keys(hit.v).length ? 3_600_000 : 300_000)) return hit.v;
+  let v = {};
+  try { v = parseStandings(await getJSON(`${BASE}/v2/sports/soccer/${league}/standings`, proxy, { retries: 3 })); } catch { /* none */ }
+  standingsCache.set(league, { t: Date.now(), v });
+  return v;
+}
+
+// Domestic league competitions look like "eng.1", "bra.2".
+const isDomestic = (slug) => /^[a-z]{3}\.\d$/.test(slug);
+const NON_COUNTRY = new Set(['uefa', 'fifa', 'conmebol', 'concacaf', 'afc', 'caf', 'ofc', 'club']);
+// Leagues a team may have a season record in, besides the match's own competition:
+// leagues where it appears in the current scan, then the country's divisions for a domestic cup.
+export function homeLeagueCandidates(teamId, league, scanned = byLeague) {
+  const out = [];
+  for (const [lg, ms] of scanned) {
+    if (lg !== league && isDomestic(lg) && ms.some((m) => m.home.id === String(teamId) || m.away.id === String(teamId))) out.push(lg);
+  }
+  const country = league.split('.')[0];
+  if (!NON_COUNTRY.has(country)) {
+    for (const [lg] of LEAGUES) if (lg !== league && lg.startsWith(`${country}.`) && isDomestic(lg) && !out.includes(lg) && !bad[lg]) out.push(lg);
+  }
+  return out.slice(0, 5);
+}
+
+// Season record from the team's domestic league, for cup and continental games or when the
+// competition's own table is short (league phase after 4 games, early rounds).
+async function domesticRecord(teamId, league, proxy) {
+  for (const lg of homeLeagueCandidates(teamId, league)) {
+    const row = (await leagueStandings(lg, proxy))[String(teamId)];
+    if (row?.gp >= 5) return { row: { ...row, league: lg }, league: lg };
+  }
+  return null;
+}
+
 export async function fetchDetail(match, { proxy } = {}) {
-  const standings = await cached(`st:${match.league}`, 3_600_000, () =>
-    getJSON(`${BASE}/v2/sports/soccer/${match.league}/standings`, proxy).then(parseStandings).catch(() => ({}))
-  );
+  const standings = await leagueStandings(match.league, proxy);
   const summary = await getJSON(
     `${BASE}/site/v2/sports/soccer/${match.league}/summary?event=${match.id}`,
     proxy
   );
   const detail = parseSummary(summary, match, standings);
-  // Recent form missing from the match data: build it from each team's own fixture list.
+  const formLeague = { home: match.league, away: match.league };
+  // No usable season record in this competition for either team (cup tie, continental league phase,
+  // early rounds): use both teams' domestic league tables instead, so the two records are comparable.
+  if (!(detail.table.home?.gp >= 5 && detail.table.away?.gp >= 5)) {
+    const dom = await Promise.all(['home', 'away'].map((side) => domesticRecord(match[side].id, match.league, proxy).catch(() => null)));
+    ['home', 'away'].forEach((side, i) => {
+      if (dom[i]) { detail.table[side] = dom[i].row; formLeague[side] = dom[i].league; }
+    });
+    if (dom[0] && dom[1] && dom[0].league === dom[1].league) detail.leagueAvg = leagueAverage(await leagueStandings(dom[0].league, proxy));
+  }
   for (const side of ['home', 'away']) {
+    const id = match[side].id;
+    // Recent form missing from the match data: build it from each team's own fixture list,
+    // in this competition and, if that's too short, in its domestic league.
     if (detail.form[side].length >= 4) continue;
-    try {
-      const games = await teamForm(match.league, match[side].id, match.date, proxy);
-      if (games.length > detail.form[side].length) detail.form[side] = games;
-    } catch { /* keep what we have */ }
+    for (const lg of [...new Set([match.league, formLeague[side], ...homeLeagueCandidates(id, match.league).slice(0, 2)])]) {
+      try {
+        const games = await teamForm(lg, id, match.date, proxy);
+        if (games.length > detail.form[side].length) detail.form[side] = games;
+      } catch { /* keep what we have */ }
+      if (detail.form[side].length >= 4) break;
+    }
   }
   return detail;
 }

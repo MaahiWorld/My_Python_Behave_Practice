@@ -120,6 +120,7 @@ async function loadMatches(force = false) {
 // Pre-match analyses are kept on the device for 6 hours, so reopening the app doesn't refetch them.
 const DETAIL_STORE = 'gs:details';
 const SAVED_MS = 6 * 3_600_000;
+const THIN_RETRY_MS = 20 * 60_000;
 (function restoreDetails() {
   try {
     const saved = JSON.parse(localStorage.getItem(DETAIL_STORE) || '{}');
@@ -146,7 +147,9 @@ const pendingSaves = new Map();
 async function getDetail(m, { force = false, ttl } = {}) {
   const k = keyOf(m);
   const hit = state.details.get(k);
-  const maxAge = ttl ?? (m.state === 'in' ? 25_000 : 600_000);
+  let maxAge = ttl ?? (m.state === 'in' ? 25_000 : 600_000);
+  // An analysis that lacked data (often a refused request) is retried after 20 minutes, not kept 6 hours.
+  if (hit && m.state === 'pre' && m.league !== 'demo' && predict(m, hit.detail).confidence.level !== 'High') maxAge = Math.min(maxAge, THIN_RETRY_MS);
   if (!force && hit && Date.now() - hit.at < maxAge) return hit.detail;
   const src = sourceById(m.source);
   const detail = m.league === 'demo' ? demoDetail(m) : await src.adapter.fetchDetail(m, { proxy: settings.proxy, key: keyFor(src.id) });

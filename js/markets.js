@@ -143,6 +143,8 @@ export function marketPicks(match, detail) {
 }
 
 // ---- Track record (stored on this device, see js/records.js) ----
+// Bookmaker price when the pick was made (js/odds.js), so profit per stake can be tracked.
+export const oddsFields = (o) => (o?.best > 1 ? { odds: o.best, oddsBook: o.bestBook || null, fairP: Math.round(o.fair * 1000) / 1000 } : {});
 export const recordId = (match, marketId) => `${match.league}/${match.id}/${marketId}`;
 
 export function recordPicks(match, picks) {
@@ -155,6 +157,7 @@ export function recordPicks(match, picks) {
     at: Date.now(), minute: match.state === 'in' ? match.minute : null, score: `${match.home.score || 0}-${match.away.score || 0}`,
     checks: (pk.checks || []).map((c) => `${c.label} ${c.txt}`),
     expected: pk.pred ? Math.round(pk.pred.expectedFinalTotal * 100) / 100 : null,
+    ...oddsFields(pk.odds),
     result: null,
   })));
 }

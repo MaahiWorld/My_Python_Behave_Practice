@@ -8,7 +8,8 @@ test('registry: ESPN is free and keyless, others need keys and have adapters', (
   assert.equal(SOURCES[0].needsKey, false);
   for (const s of SOURCES.slice(1)) {
     assert.equal(s.needsKey, true);
-    for (const fn of ['fetchMatches', 'fetchDetail', 'test']) assert.equal(typeof s.adapter[fn], 'function', `${s.id}.${fn}`);
+    const fns = s.kind === 'odds' ? ['test'] : ['fetchMatches', 'fetchDetail', 'test'];
+    for (const fn of fns) assert.equal(typeof s.adapter[fn], 'function', `${s.id}.${fn}`);
   }
 });
 

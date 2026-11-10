@@ -13,6 +13,7 @@
 // own (lower) serve level and is not backtested: no free WTA history was reachable.
 import { BASE, getJSON, cached, num, ymd } from './api.js';
 import { addRecords, updateRecords } from './records.js';
+import { oddsFields } from './markets.js';
 
 export const TENNIS_PARAMS = {
   serveBase: { atp: 0.65, wta: 0.56 }, // average share of service points won (hard court)
@@ -327,7 +328,7 @@ export function recordTennisPicks(m, picks) {
     match: `${m.a.name} vs ${m.b.name}`, home: nm(m.a), away: nm(m.b), league: m.tour, eventId: m.id,
     leagueName: [m.event, m.round].filter(Boolean).join(' · '), source: 'espn', kickoff: m.date,
     at: Date.now(), minute: null, score: m.state === 'in' ? scoreState(m).sets.map(([x, y]) => `${x}-${y}`).join(' ') : null,
-    ranks: [m.a.rank, m.b.rank], result: null,
+    ranks: [m.a.rank, m.b.rank], ...oddsFields(pk.odds), result: null,
   })));
 }
 

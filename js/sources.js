@@ -2,6 +2,7 @@
 // a key is saved on the Data sources page and the source is selected.
 // Every adapter returns the same normalized shapes as js/api.js (ESPN).
 import { fetchMatches as espnMatches, fetchDetail as espnDetail, num, proxied, cached } from './api.js';
+import { oddsSource } from './odds.js';
 
 const today = () => {
   const d = new Date();
@@ -378,6 +379,13 @@ export const SOURCES = [
     signup: 'https://www.football-data.org/client/register', adapter: footballData,
     provides: ['Scores (12 competitions free)', 'Form', 'Head-to-head', 'League tables', 'Lineups (paid tiers)'],
     lacks: ['Shot stats', 'xG'], note: 'Free tier scores are delayed and limited to 10 requests/minute.',
+  },
+  {
+    id: 'theodds', kind: 'odds', priority: 0, name: 'The Odds API (bookmaker odds)', cost: 'Free 500 credits/month · paid from ~$30/mo', needsKey: true,
+    signup: 'https://the-odds-api.com/#get-access', adapter: oddsSource,
+    provides: ['Bookmaker odds: 1X2, Over/Under goals, tennis match winner', 'Consensus chance (margin removed)', 'Best price and edge vs the model', 'Profit tracking on the Results page'],
+    lacks: ['BTTS and first-half markets', 'Tennis sets / games'],
+    note: 'Odds sit next to the model\'s chances; they don\'t change which picks are made. Saves credits: only competitions with a match in the next 2 days are requested, each at most every 2 hours (2 credits per football competition, 1 per tennis tournament).',
   },
 ];
 export const sourceById = (id) => SOURCES.find((s) => s.id === id) || SOURCES[0];

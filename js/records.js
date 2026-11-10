@@ -44,18 +44,23 @@ export function summarize(list) {
   const groups = new Map();
   for (const x of list) {
     const k = `${x.sport || 'football'}|${x.market}`;
-    const g = groups.get(k) || { sport: x.sport || 'football', market: x.market, picks: 0, settled: 0, won: 0, pending: 0, void: 0, sumP: 0 };
+    const g = groups.get(k) || { sport: x.sport || 'football', market: x.market, picks: 0, settled: 0, won: 0, pending: 0, void: 0, sumP: 0, priced: 0, profit: 0 };
     g.picks++;
-    if (x.result === 'won' || x.result === 'lost') { g.settled++; g.sumP += x.p; if (x.result === 'won') g.won++; }
+    if (x.result === 'won' || x.result === 'lost') {
+      g.settled++; g.sumP += x.p; if (x.result === 'won') g.won++;
+      // Level stakes of 1 at the best price recorded when the pick was made.
+      if (x.odds > 1) { g.priced++; g.profit += x.result === 'won' ? x.odds - 1 : -1; }
+    }
     else if (!x.result) g.pending++;
     else g.void++;
     groups.set(k, g);
   }
-  return [...groups.values()].map((g) => ({ ...g, hitRate: g.settled ? g.won / g.settled : null, claimed: g.settled ? g.sumP / g.settled : null }));
+  return [...groups.values()].map((g) => ({ ...g, hitRate: g.settled ? g.won / g.settled : null, claimed: g.settled ? g.sumP / g.settled : null,
+    roi: g.priced ? g.profit / g.priced : null }));
 }
 
 export function toCSV(list) {
-  const cols = ['sport', 'leagueName', 'kickoff', 'match', 'market', 'label', 'p', 'minute', 'score', 'final', 'ht', 'sets', 'result'];
+  const cols = ['sport', 'leagueName', 'kickoff', 'match', 'market', 'label', 'p', 'odds', 'oddsBook', 'fairP', 'minute', 'score', 'final', 'ht', 'sets', 'result'];
   const q = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
   return [cols.join(','), ...list.map((x) => cols.map((c) => q(c === 'sport' ? x.sport || 'football' : x[c])).join(','))].join('\n');
 }

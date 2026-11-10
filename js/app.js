@@ -1,4 +1,5 @@
 import { SOURCES, sourceById, afQuota } from './sources.js';
+import { ODDS_SPORT, oddsList, findFootballOdds, findTennisOdds, oddsForSide, edgeOf, activeTennisKeys, oddsQuota } from './odds.js';
 import { scanStats as espnScan, fetchUpcoming, fetchResult } from './api.js';
 import { demoMatches, demoDetail } from './demo.js';
 import { predict, phaseOf } from './model.js';
@@ -26,7 +27,38 @@ const settings = {
 const keyFor = (id) => store.get('key:' + id, '');
 const scanOn = (id) => store.get('scan:' + id, true);
 // ESPN is always scanned; keyed sources join the scan once a key is saved (and not switched off).
-const enabledSources = () => SOURCES.filter((s) => !s.needsKey || (keyFor(s.id) && scanOn(s.id)));
+const enabledSources = () => SOURCES.filter((s) => s.kind !== 'odds' && (!s.needsKey || (keyFor(s.id) && scanOn(s.id))));
+
+// ---- Bookmaker odds (js/odds.js; only with a key for The Odds API) ----
+const oddsKey = () => (keyFor('theodds') && scanOn('theodds') ? keyFor('theodds') : '');
+const ODDS_AHEAD_MS = 2 * 86_400_000; // only competitions with a match in the next 2 days are requested
+function oddsUpdated() {
+  const r = route();
+  if (r.name === 'match') renderMatch(r, true); else rerenderSoon();
+}
+function footballOdds(m) {
+  const key = oddsKey(), sk = ODDS_SPORT[m.league];
+  if (!key || !sk || m.state === 'post' || state.usingDemo || new Date(m.date) - Date.now() > ODDS_AHEAD_MS) return null;
+  return findFootballOdds(m, oddsList(sk, 'football', { key, proxy: settings.proxy, onUpdate: oddsUpdated })?.list);
+}
+function tennisOdds(m) {
+  const key = oddsKey();
+  if (!key || m.state === 'post' || state.tennisDemo || new Date(m.date) - Date.now() > ODDS_AHEAD_MS) return null;
+  const tourKeys = activeTennisKeys({ key, proxy: settings.proxy, onUpdate: oddsUpdated }).filter((k) => k.startsWith(`tennis_${m.tour}_`));
+  for (const k of tourKeys) {
+    const o = findTennisOdds(m, oddsList(k, 'tennis', { key, proxy: settings.proxy, onUpdate: oddsUpdated })?.list);
+    if (o) return o;
+  }
+  return null;
+}
+// "Bookmakers 71% · best 1.48 (Unibet) · edge +5%" for one side, or ''.
+function oddsLine(o, p, compact = false) {
+  if (!o) return '';
+  const e = edgeOf(p, o.best);
+  const edge = e == null ? '' : ` · <span class="${e > 0 ? 'good' : 'bad'}">edge ${e > 0 ? '+' : ''}${Math.round(e * 100)}%</span>`;
+  return compact ? `<span class="muted small">bookies ${pct(o.fair)} · ${o.best.toFixed(2)}${edge}</span>`
+    : `<div class="small odds-line">Bookmakers: <b>${pct(o.fair)}</b> · best price <b>${o.best.toFixed(2)}</b>${o.bestBook ? ` (${esc(o.bestBook)})` : ''}${edge}</div>`;
+}
 
 // ---- State ----
 const state = {
@@ -428,6 +460,8 @@ function renderMarkets() {
     const hit = state.details.get(keyOf(m));
     if (!hit || (m.state !== 'in' && m.state !== 'pre')) continue;
     const picks = marketPicks(m, hit.detail);
+    const odds = footballOdds(m);
+    for (const pk of picks) pk.odds = oddsForSide(odds, pk.market.id, pk.side);
     recordPicks(m, picks);
     for (const pk of picks) all.push({ m, pk });
   }
@@ -445,6 +479,7 @@ function renderMarkets() {
       <div class="pick-teams">${esc(m.home.short)} ${m.state === 'pre' ? 'vs' : `<b>${m.home.score}–${m.away.score}</b>`} ${esc(m.away.short)}</div>
       <div class="pick-main"><span class="pick-label ${pk.side}">${esc(pk.label)}</span><span class="pick-p">${pct(pk.p)}</span><span class="badge on">${pk.level} confidence</span></div>
       <div class="checks">${pk.checks.map((c) => `<span class="chk">✓ ${esc(c.label)} ${esc(c.txt)}</span>`).join('')}</div>
+      ${oddsLine(pk.odds, pk.p)}
       <div class="muted small">Expected ${live ? 'final ' : ''}total ${pk.pred.expectedFinalTotal.toFixed(1)} goals${live ? ` · ${pk.pred.expectedMore.toFixed(1)} more expected` : ''}</div>
     </a>`;
   };
@@ -569,17 +604,20 @@ const STATUS_TXT = {
 function marketsPanel(m, d) {
   if (m.state === 'post' || !d) return '';
   const p = predict(m, d);
+  const odds = footballOdds(m);
   const rows = evaluateMarkets(m, d).map((e) => {
     const b = bestSide(e.market, p);
     if (!b) return `<tr><td>${esc(e.market.name)}</td><td colspan="2" class="muted">${e.market.id.startsWith('h1') ? 'first half over' : '–'}</td><td class="muted small">${STATUS_TXT[e.status] || ''}</td></tr>`;
     const label = e.label || sideLabel(e.market, b.side, m);
     const p100 = e.p ?? b.p;
     const extra = e.market.sides ? ` <span class="muted small">(${e.market.sides.map((sd) => `${{ home: '1', draw: 'X', away: '2' }[sd]} ${pct(b.probs[sd])}`).join(' · ')})</span>` : '';
-    return `<tr class="${e.status === 'pick' ? 'is-pick' : ''}"><td>${esc(e.market.name)}</td><td><b>${esc(label)}</b>${extra}</td><td class="num">${pct(p100)}</td>
+    const oddsTxt = oddsLine(oddsForSide(odds, e.market.id, e.side || b.side), p100, true);
+    return `<tr class="${e.status === 'pick' ? 'is-pick' : ''}"><td>${esc(e.market.name)}</td><td><b>${esc(label)}</b>${extra}${oddsTxt ? `<br>${oddsTxt}` : ''}</td><td class="num">${pct(p100)}</td>
       <td class="small ${e.status === 'pick' ? 'good' : 'muted'}">${e.status === 'pick' ? '✓ ' : ''}${STATUS_TXT[e.status] || ''}</td></tr>`;
   }).join('');
   return `<section class="card section"><h3>Markets for this match</h3>
     <table class="mk-table"><tbody>${rows}</tbody></table>
+    ${odds ? `<p class="muted small">Bookmaker figures: consensus of ${odds.h2h?.books || 'several'} bookmakers with their margin removed, and the best price on offer; edge = model chance × best price − 1. Odds don't change which picks are made.</p>` : ''}
     <p class="muted small">Most likely side of each market. Only validated picks (see <a href="#/markets">Markets</a>) are recorded and checked on the <a href="#/results">Results</a> page.</p></section>`;
 }
 
@@ -662,6 +700,8 @@ function renderTennis() {
   for (const m of all) {
     if (m.state === 'post') continue;
     const ps = tennisMarkets(m, tPred(m)).filter((x) => x.status === 'pick');
+    const to = ps.some((x) => x.market === 'tw') ? tennisOdds(m) : null;
+    for (const x of ps) x.odds = x.market === 'tw' ? oddsForSide(to, 'tw', x.side) : null;
     if (!state.tennisDemo) recordTennisPicks(m, ps);
     for (const x of ps) picks.push({ m, x });
   }
@@ -673,6 +713,7 @@ function renderTennis() {
       <div class="pick-top"><span class="lg-line">${esc(m.event)}${m.round ? ` · ${esc(m.round)}` : ''}</span><span class="status ${m.state === 'in' ? 'live' : ''}">${esc(tStatus(m))}</span></div>
       <div class="pick-teams">${esc(m.a.short)} ${rk(m.a)} vs ${esc(m.b.short)} ${rk(m.b)}${m.state === 'in' ? ` · <b>${esc(setsTxt(m))}</b>` : ''}</div>
       <div class="pick-main"><span class="pick-label yes">${esc(x.label)}</span><span class="pick-p">${pct(x.p)}</span><span class="badge ready">${m.tour === 'wta' ? 'WTA · not backtested' : 'ATP · backtested'}</span></div>
+      ${oddsLine(x.odds, x.p)}
     </div>`;
   const banner = state.tennisDemo ? '<div class="banner">Showing <b>demo tennis matches</b> (fictional players). Turn off demo mode in ⚙ for the live ATP/WTA feed.</div>'
     : state.tennisError ? `<div class="banner">Couldn't load tennis (${esc(state.tennisError)}). ${all.length ? 'Showing the last list.' : 'Check your connection or set a CORS proxy in ⚙.'}</div>` : '';
@@ -775,12 +816,14 @@ function renderResults() {
   const isStatus = (x) => f.status === 'all' || (f.status === 'pending' ? !x.result : f.status === 'other' ? ['void', 'unknown'].includes(x.result) : x.result === f.status);
   const list = bySport.filter((x) => (f.market === 'all' || `${x.sport || 'football'}|${x.market}` === f.market) && isStatus(x));
   const sum = summarize(bySport);
-  const tot = sum.reduce((s, g) => ({ settled: s.settled + g.settled, won: s.won + g.won, pending: s.pending + g.pending, sumP: s.sumP + g.sumP }), { settled: 0, won: 0, pending: 0, sumP: 0 });
+  const tot = sum.reduce((s, g) => ({ settled: s.settled + g.settled, won: s.won + g.won, pending: s.pending + g.pending, sumP: s.sumP + g.sumP, priced: s.priced + g.priced, profit: s.profit + g.profit }), { settled: 0, won: 0, pending: 0, sumP: 0, priced: 0, profit: 0 });
+  const money = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
   const chip = (k, v, l) => `<button class="chip" data-res="${k}:${esc(v)}" aria-pressed="${f[k] === v}">${esc(l)}</button>`;
   const rows = sum.sort((a, b) => b.picks - a.picks).map((g) => `<tr>
       <td>${g.sport === 'tennis' ? '🎾' : '⚽'} ${esc(marketName(g))}</td><td class="num">${g.picks}</td>
       <td class="num">${g.settled ? `${g.won}/${g.settled}` : '–'}</td>
       <td class="num"><b>${g.hitRate == null ? '–' : pct(g.hitRate)}</b></td><td class="num muted">${g.claimed == null ? '–' : pct(g.claimed)}</td>
+      <td class="num">${g.priced ? `<span class="${g.profit >= 0 ? 'good' : 'bad'}">${money(g.profit)}</span> <span class="muted small">(${g.priced})</span>` : '–'}</td>
       <td class="num muted">${g.pending || ''}</td></tr>`).join('');
   let body = '', lastDay = '';
   for (const x of list.slice(0, 300)) {
@@ -793,7 +836,7 @@ function renderResults() {
     body += `<div class="card res-row ${cls}">
       <div class="pick-top"><span class="lg-line">${x.sport === 'tennis' ? '🎾' : '⚽'} ${esc(x.leagueName || '')}</span><span class="badge res-${cls}">${txt}</span></div>
       <div class="pick-teams">${link ? `<a href="${link}">${esc(x.match)}</a>` : esc(x.match)}</div>
-      <div class="pick-main"><span class="pick-label yes">${esc(label)}</span><span class="pick-p">${pct(x.p)}</span><span class="muted small">${esc(marketName(x))} · picked ${esc(when)}</span></div>
+      <div class="pick-main"><span class="pick-label yes">${esc(label)}</span><span class="pick-p">${pct(x.p)}</span><span class="muted small">${esc(marketName(x))} · picked ${esc(when)}${x.odds ? ` · @ ${x.odds.toFixed(2)}${x.fairP != null ? ` (bookies ${pct(x.fairP)})` : ''}` : ''}</span></div>
       <div class="small ${x.result === 'won' ? 'good' : x.result === 'lost' ? 'bad' : 'muted'}">${esc(explainResult(x))}</div>
       ${x.checks?.length ? `<div class="checks">${x.checks.map((c) => `<span class="chk">✓ ${esc(c)}</span>`).join('')}</div>` : ''}
     </div>`;
@@ -804,8 +847,9 @@ function renderResults() {
     <div class="card section record">
       <h3>Track record${f.sport !== 'all' ? ` · ${f.sport}` : ''}</h3>
       <p>${tot.settled ? `<b>${tot.won} of ${tot.settled}</b> picks correct (<b>${pct(tot.won / tot.settled)}</b>); the model claimed ${pct(tot.sumP / tot.settled)} on average.` : 'No settled picks yet.'}${tot.pending ? ` ${tot.pending} awaiting a result.` : ''}</p>
-      ${rows ? `<table class="mk-table res-sum"><thead><tr><th>Market</th><th>Picks</th><th>Won</th><th>Hit rate</th><th>Claimed</th><th>Pending</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="muted small">If the hit rate keeps falling well below the claimed chance, that market's predictions are too confident.</p>` : ''}
+      ${tot.priced ? `<p>Profit at the best price, 1 unit per pick: <b class="${tot.profit >= 0 ? 'good' : 'bad'}">${money(tot.profit)}</b> over ${tot.priced} priced pick${tot.priced > 1 ? 's' : ''} (<b>${tot.profit >= 0 ? '+' : ''}${Math.round((tot.profit / tot.priced) * 1000) / 10}%</b> per stake).</p>` : ''}
+      ${rows ? `<table class="mk-table res-sum"><thead><tr><th>Market</th><th>Picks</th><th>Won</th><th>Hit rate</th><th>Claimed</th><th>Profit</th><th>Pending</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="muted small">If the hit rate keeps falling well below the claimed chance, that market's predictions are too confident. Profit counts only picks that had a bookmaker price when they were made (add The Odds API on <a href="#/sources">Data sources</a>); a high hit rate at short prices can still lose money.</p>` : ''}
       <div class="src-actions">
         <button class="btn" data-resact="check" type="button" ${state.checking ? 'disabled' : ''}>⟳ Check results now</button>
         <button class="btn" data-resact="csv" type="button" ${all.length ? '' : 'disabled'}>Export CSV</button>
@@ -1030,14 +1074,15 @@ function renderSources() {
       const key = keyFor(s.id);
       const on = !s.needsKey || (key && scanOn(s.id));
       const status = !s.needsKey ? '<span class="badge on">Always on</span>'
-        : on ? '<span class="badge on">Scanning</span>' : key ? '<span class="badge ready">Off</span>' : '<span class="badge off">Needs key</span>';
+        : on ? `<span class="badge on">${s.kind === 'odds' ? 'On' : 'Scanning'}</span>` : key ? '<span class="badge ready">Off</span>' : '<span class="badge off">Needs key</span>';
       const quota = s.id === 'apifootball' && key ? `<p class="small quota">Free requests left today: <b>${afQuota.remaining}/${afQuota.limit}</b> (resets 00:00 UTC)</p>` : '';
+      const oddsInfo = s.id === 'theodds' && key && oddsQuota.remaining != null ? `<p class="small quota">Credits left this month: <b>${oddsQuota.remaining}</b>${oddsQuota.used != null ? ` (${oddsQuota.used} used)` : ''}</p>` : '';
       const espnInfo = s.id === 'espn' ? `<p class="small quota">${espnScan.leagues} competitions in the scan list${espnScan.active ? ` · ${espnScan.active} with matches today` : ''}</p>` : '';
       return `<section class="card section src" data-src="${s.id}">
         <div class="src-head"><h3>${esc(s.name)}</h3>${status}</div>
         <div class="src-cost">${esc(s.cost)}</div>
         <ul class="feat">${s.provides.map((f) => `<li class="yes">${esc(f)}</li>`).join('')}${(s.lacks || []).map((f) => `<li class="no">${esc(f)}</li>`).join('')}</ul>
-        ${quota}${espnInfo}
+        ${quota}${oddsInfo}${espnInfo}
         <p class="muted small">${esc(s.note)}${s.signup ? ` <a href="${esc(s.signup)}" target="_blank" rel="noopener">Get a key ↗</a>` : ''}</p>
         ${s.needsKey ? `<div class="key-row">
             <input type="password" class="key-input" placeholder="Paste API key" value="${esc(key)}" autocomplete="off" spellcheck="false" aria-label="${esc(s.name)} API key">
@@ -1048,7 +1093,7 @@ function renderSources() {
             <button class="btn" data-act="test" type="button">Test</button>
             ${key ? '<button class="btn" data-act="remove" type="button">Remove</button>' : ''}
           </div>` : ''}
-        ${s.needsKey && key ? `<label class="scan-toggle"><input type="checkbox" data-act="scan" ${scanOn(s.id) ? 'checked' : ''}> Include in the match scan</label>` : ''}
+        ${s.needsKey && key ? `<label class="scan-toggle"><input type="checkbox" data-act="scan" ${scanOn(s.id) ? 'checked' : ''}> ${s.kind === 'odds' ? 'Show bookmaker odds' : 'Include in the match scan'}</label>` : ''}
         <p class="test-result small" aria-live="polite"></p>
       </section>`;
     }).join('')}
@@ -1080,7 +1125,7 @@ view.addEventListener('click', async (e) => {
     try {
       const msg = await sourceById(id).adapter.test({ key, proxy: settings.proxy });
       store.set('key:' + id, key);
-      onSourceChange(); renderSources(); flash(id, `✓ ${msg}. Key saved and added to the scan.`);
+      onSourceChange(); renderSources(); flash(id, `✓ ${msg}. Key saved${sourceById(id).kind === 'odds' ? '' : ' and added to the scan'}.`);
     } catch (err) {
       out.textContent = `✗ ${err.message === 'Failed to fetch' ? 'Could not reach the service from this browser. Try setting the CORS proxy in ⚙ Settings.' : err.message}`;
       out.className = 'test-result small bad';

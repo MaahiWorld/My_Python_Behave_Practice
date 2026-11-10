@@ -375,3 +375,4 @@ a.icon-btn { display: grid; place-items: center; }
 .badge.res-won { background: var(--accent); color: #04261b; }
 .badge.res-lost { background: var(--live); color: #fff; }
 .badge.res-pending, .badge.res-void { background: var(--surface-2); color: var(--muted); }
+.odds-line { margin: 4px 0; }

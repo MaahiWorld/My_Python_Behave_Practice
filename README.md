@@ -76,6 +76,17 @@ bookmakers price very short). Underdog to win a set and total sets give **no pic
 in 100. WTA uses the same settings and isn't backtested. Details in
 [backtest/TENNIS.md](backtest/TENNIS.md).
 
+## Bookmaker odds (optional)
+
+Add a key for **The Odds API** (free: 500 credits a month) on the Data sources page and the app shows,
+next to the model's chance: the bookmakers' consensus chance (each bookmaker's margin removed, then
+averaged), the best price on offer and the **edge** (model chance × best price − 1). Covered: 1X2,
+Over/Under 1.5 and 2.5 goals when offered, and the tennis match winner (`js/odds.js`). Every pick
+stores the best price when it was made, and the Results page shows **profit per stake**. Odds don't
+change which picks are made: the pick rules were backtested without odds, so they stay information
+until enough priced picks have settled. To save credits, only competitions with a match in the next 2
+days are requested, at most every 2 hours each.
+
 ## Results page
 
 Every pick shown on the Markets and Tennis pages is saved on the device the first time it appears
@@ -166,6 +177,7 @@ js/demo.js            Offline demo data
 js/sources.js         Paid/keyed data source adapters + registry
 js/markets.js         Football markets (O1.5/O2.5/BTTS/1X2/1st half), validation, settlement
 js/tennis.js          Tennis model, ESPN tennis parser, tennis markets
+js/odds.js            Bookmaker odds (The Odds API): parsing, matching, edge, credit budget
 backtest/tennis-*.js  Tennis backtest (TML-Database ATP results): fetch-tennis.sh, tennis-tune.js, tennis-run.js
 js/records.js         Stored picks and results (Results page)
 js/merge.js           Merging and de-duplicating matches across sources

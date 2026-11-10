@@ -1,23 +1,34 @@
-// Tennis predictions (experimental): match winner, underdog to win a set, total sets, total games.
+// Tennis predictions: match winner, underdog to win a set, total sets, total games.
 //
 // Model: each player's chance of winning a point on serve drives a point → game → set → match
 // Markov chain (standard tiebreak at 6–6 in every set). Pre-match, the two serve strengths are set so
 // the match-winner chance equals a ranking-based estimate; live, the chain starts from the current
-// set and game score. Only what the free ESPN feed provides is used: world rankings and the score.
-// There is no serve/return history, surface record or head-to-head, and the model has not been
-// backtested (no free historical tennis data was reachable when it was built), so every pick is
-// recorded and checked on the Results page to build a track record.
+// set and game score. Players don't play at a fixed level: on some days the favourite is far better
+// than the ranking gap says, on others the match is closer. That day-to-day spread (`dayForm`) is
+// averaged over, which makes straight-set wins and lopsided game totals as common as they really are.
+// Surface (from the tournament name and time of year) sets how dominant serve is: more holds on
+// grass, fewer on clay, which moves total games. Finally each market's probability is recalibrated
+// on past matches (`calib`). Every setting was fitted on ATP matches from 2019–2023 and checked on
+// 2024–2026, which the fitting never saw (backtest/TENNIS.md). WTA uses the same settings with its
+// own (lower) serve level and is not backtested: no free WTA history was reachable.
 import { BASE, getJSON, cached, num, ymd } from './api.js';
 import { addRecords, updateRecords } from './records.js';
 
 export const TENNIS_PARAMS = {
-  serveBase: { atp: 0.64, wta: 0.56 }, // average share of service points won
+  serveBase: { atp: 0.64, wta: 0.56 }, // average share of service points won (hard court)
+  surface: { Hard: 0, Clay: -0.015, Grass: 0.015 }, // added to serveBase
   rankPower: 0.5, // P(A beats B, best of 3) = 1 / (1 + (rankA / rankB)^power)
+  dayForm: 0, // spread (sd) of the serve-strength gap from one day to the next
+  // Pre-match only: logistic recalibration p' = sigmoid(a + b·logit p), per market (yes / over side).
+  calib: {},
   maxRank: 400, // beyond this, rankings say too little for a pick
 };
-export const TENNIS_RULES = { minProb: 0.75 };
+// Bars: the model's probability a pick needs, per market (null = no picks for that market).
+// Picks are made before the first ball only (the backtest tests pre-match predictions; live
+// probabilities are still shown).
+export const TENNIS_RULES = { minProb: 0.75, markets: {}, preMatchOnly: true };
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v * 1e12) / 1e12)); // rounding: mixtures sum to 1 ± 1e-16
 
 // ---- Point → game → set → match ----
 export function holdProb(p) {
@@ -130,21 +141,65 @@ export function rankWinProb(rankA, rankB) {
   return 1 / (1 + (rankA / rankB) ** TENNIS_PARAMS.rankPower);
 }
 
-// Serve-point strengths that reproduce a best-of-3 win chance for A.
+// Day-to-day form: 5-point Gauss–Hermite rule for a standard normal (nodes z, weights w).
+const GH = [[0, 8 / 15], [1.355626, (7 + 2 * Math.sqrt(10)) / 60], [-1.355626, (7 + 2 * Math.sqrt(10)) / 60],
+  [2.856970, (7 - 2 * Math.sqrt(10)) / 60], [-2.856970, (7 - 2 * Math.sqrt(10)) / 60]];
+
+// matchDist averaged over day-to-day form: A's serve edge d (pa = s + d, pb = s − d) varies by
+// ± TENNIS_PARAMS.dayForm from match to match.
+export function matchDistMix(s, d, bestOf = 3, state = {}, sd = TENNIS_PARAMS.dayForm) {
+  if (!(sd > 0)) return matchDist(s + d, s - d, bestOf, state);
+  const out = { pA: 0, sets: {}, games: {}, score: {}, aSet: 0, bSet: 0, expectedGames: 0 };
+  const addTo = (o, x, w) => { for (const [k, v] of Object.entries(x)) o[k] = (o[k] || 0) + w * v; };
+  for (const [z, w] of GH) {
+    const dd = clamp(d + sd * z, -0.3, 0.3);
+    const r = matchDist(clamp(s + dd, 0.3, 0.95), clamp(s - dd, 0.3, 0.95), bestOf, state);
+    out.pA += w * r.pA; out.aSet += w * r.aSet; out.bSet += w * r.bSet; out.expectedGames += w * r.expectedGames;
+    addTo(out.sets, r.sets, w); addTo(out.games, r.games, w); addTo(out.score, r.score, w);
+  }
+  return out;
+}
+
+export const serveLevel = (tour = 'atp', surface = 'Hard') =>
+  (TENNIS_PARAMS.serveBase[tour] ?? 0.6) + (TENNIS_PARAMS.surface[surface] ?? 0);
+
+// Serve-point strengths that reproduce a best-of-3 win chance for A (allowing for day-to-day form).
 const calCache = new Map();
-export function calibrate(pWin, tour = 'atp') {
-  const s = TENNIS_PARAMS.serveBase[tour] ?? 0.6;
-  const key = `${tour}|${pWin.toFixed(4)}`;
+export function calibrate(pWin, tour = 'atp', surface = 'Hard') {
+  const s = serveLevel(tour, surface), sd = TENNIS_PARAMS.dayForm;
+  const key = `${s}|${sd}|${pWin.toFixed(3)}`;
   if (calCache.has(key)) return calCache.get(key);
-  let lo = -0.2, hi = 0.2;
-  for (let i = 0; i < 30; i++) {
+  let lo = -0.25, hi = 0.25;
+  for (let i = 0; i < 22; i++) {
     const d = (lo + hi) / 2;
-    if (matchDist(s + d, s - d, 3).pA < pWin) lo = d; else hi = d;
+    if (matchDistMix(s, d, 3, {}, sd).pA < pWin) lo = d; else hi = d;
   }
   const d = (lo + hi) / 2;
-  const out = { pa: s + d, pb: s - d };
+  const out = { pa: s + d, pb: s - d, s, d };
+  if (calCache.size > 5000) calCache.clear();
   calCache.set(key, out);
   return out;
+}
+
+// Logistic recalibration of a pre-match probability (TENNIS_PARAMS.calib[key] = [a, b]).
+export function recalibrate(key, p) {
+  const c = TENNIS_PARAMS.calib?.[key];
+  if (p == null || !c) return p;
+  const q = clamp(p, 1e-6, 1 - 1e-6);
+  return 1 / (1 + Math.exp(-(c[0] + c[1] * Math.log(q / (1 - q)))));
+}
+
+// Court surface from the tournament name, else the time of year (the ESPN feed doesn't say).
+const CLAY = /roland|french open|monte|madrid|rome|internazionali|italian|barcelona|godo|hamburg|munich|bmw|estoril|geneva|lyon|marrakech|houston|clay|bucharest|kitzb|gstaad|bastad|nordea|umag|croatia|santiago|chile|buenos aires|argentina|rio de|cordoba|bogota|rabat|strasbourg|parma|palermo|prague|lausanne|iasi|charleston|budapest|hungarian|bad homburg|cagliari|sardegna|banja|srpska|serbia open|belgrade|portoroz|warsaw|tiriac/i;
+const GRASS = /wimbledon|queen|halle|terra wortmann|s-hertogenbosch|libema|rosmalen|eastbourne|rothesay|mallorca|stuttgart|boss open|newport|hall of fame|birmingham|nottingham|berlin|ecotrans|bad homburg/i;
+export function surfaceOf(event = '', date = null) {
+  if (GRASS.test(event) && !/clay/i.test(event)) {
+    // Stuttgart and Bad Homburg host clay events in spring for women; grass is June–July.
+    const mo = date ? new Date(date).getUTCMonth() : 5;
+    if (mo === 5 || mo === 6) return 'Grass';
+  }
+  if (CLAY.test(event)) return 'Clay';
+  return 'Hard';
 }
 
 // Current score from the line scores: finished sets and the set in progress.
@@ -161,24 +216,37 @@ export function scoreState(m) {
 
 const LINES = { 3: [16.5, 18.5, 20.5, 22.5, 24.5, 26.5], 5: [30.5, 32.5, 34.5, 36.5, 38.5, 40.5, 42.5] };
 
+// Pre-match distributions depend only on serve level, edge and format, so they are cached.
+const preCache = new Map();
+function preDist(s, d, bestOf) {
+  const k = `${s}|${d}|${bestOf}|${TENNIS_PARAMS.dayForm}`;
+  if (!preCache.has(k)) { if (preCache.size > 5000) preCache.clear(); preCache.set(k, matchDistMix(s, d, bestOf, {})); }
+  return preCache.get(k);
+}
+
 export function predictTennis(m) {
   const pre = rankWinProb(m.a.rank, m.b.rank);
   const tour = m.tour === 'wta' ? 'wta' : 'atp';
+  const surface = m.surface || surfaceOf(m.event, m.date);
   const have = [], missing = [];
   (m.a.rank && m.b.rank ? have : missing).push('world rankings for both players');
   const known = pre != null;
-  const { pa, pb } = calibrate(known ? pre : 0.5, tour);
+  const { pa, pb, s, d: edge } = calibrate(known ? pre : 0.5, tour, surface);
   const st = scoreState(m);
-  const d = m.state === 'post' ? null : matchDist(pa, pb, m.bestOf, m.state === 'in' ? st : {});
+  const isPre = m.state === 'pre';
+  const d = m.state === 'post' ? null : isPre ? preDist(s, edge, m.bestOf) : matchDistMix(s, edge, m.bestOf, st);
   const fav = (known ? pre : 0.5) >= 0.5 ? 'a' : 'b';
   const dog = fav === 'a' ? 'b' : 'a';
   const ranksOk = known && Math.max(m.a.rank, m.b.rank) <= TENNIS_PARAMS.maxRank;
+  // Recalibration was fitted on pre-match predictions only; live probabilities are left as they are.
+  const cal = (key, p) => (isPre ? recalibrate(key, p) : p);
+  const setsLine = m.bestOf === 5 ? 3.5 : 2.5;
   return {
-    known, preWin: pre, pa, pb, fav, dog, st, dist: d, bestOf: m.bestOf,
-    pA: d ? clamp(d.pA, 0, 1) : null, dogSet: d ? clamp(dog === 'a' ? d.aSet : d.bSet, 0, 1) : null,
-    setsLine: m.bestOf === 5 ? 3.5 : 2.5,
-    overSets: d ? clamp(overProb(d.sets, m.bestOf === 5 ? 3.5 : 2.5), 0, 1) : null,
-    gameLines: d ? (LINES[m.bestOf] || LINES[3]).map((line) => ({ line, over: clamp(overProb(d.games, line), 0, 1) })) : [],
+    known, preWin: pre, pa, pb, fav, dog, st, dist: d, bestOf: m.bestOf, surface,
+    pA: d ? clamp(d.pA, 0, 1) : null, dogSet: d ? clamp(cal('tset', dog === 'a' ? d.aSet : d.bSet), 0, 1) : null,
+    setsLine,
+    overSets: d ? clamp(cal('tsets', overProb(d.sets, setsLine)), 0, 1) : null,
+    gameLines: d ? (LINES[m.bestOf] || LINES[3]).map((line) => ({ line, over: clamp(cal('tgames', overProb(d.games, line)), 0, 1) })) : [],
     expectedGames: d?.expectedGames,
     topScores: d ? Object.entries(d.score).sort((x, y) => y[1] - x[1]) : [],
     confidence: { level: ranksOk ? 'Medium' : 'Low', have, missing: ranksOk || !known ? missing : ['rankings inside the top 400'] },
@@ -194,6 +262,15 @@ export const TENNIS_MARKETS = [
   { id: 'tgames', tab: 'Games', name: 'Total games' },
 ];
 
+// The bar a market's side needs to be a pick: TENNIS_RULES.markets[id] is a number, or { side: bar },
+// with null meaning the backtest found no bar that works (no picks).
+export function barOf(market, side) {
+  const r = TENNIS_RULES.markets?.[market];
+  if (r === undefined) return TENNIS_RULES.minProb;
+  if (r === null || typeof r === 'number') return r;
+  return r[side] === undefined ? TENNIS_RULES.minProb : r[side];
+}
+
 // Every market's best side for a match: [{ market, side, label, p, status, line? }]
 export function tennisMarkets(m, pred = predictTennis(m)) {
   if (m.state === 'post' || !pred.dist) return [];
@@ -202,7 +279,10 @@ export function tennisMarkets(m, pred = predictTennis(m)) {
   const out = [];
   const push = (market, side, label, p, extra = {}) => {
     const decided = p >= 0.999 || p <= 0.001;
-    out.push({ market, side, label, p, ...extra, status: !ok ? 'low-confidence' : decided ? 'decided' : p >= TENNIS_RULES.minProb ? 'pick' : 'low-prob' });
+    const bar = barOf(market, side);
+    const status = !ok ? 'low-confidence' : decided ? 'decided' : m.state === 'in' && TENNIS_RULES.preMatchOnly ? 'in-play'
+      : bar != null && p >= bar ? 'pick' : 'low-prob';
+    out.push({ market, side, label, p, ...extra, status, need: bar });
   };
   const pA = pred.pA;
   push('tw', pA >= 0.5 ? 'a' : 'b', `${nm(pA >= 0.5 ? m.a : m.b)} to win`, Math.max(pA, 1 - pA));
@@ -211,7 +291,7 @@ export function tennisMarkets(m, pred = predictTennis(m)) {
   // Games: the line closest to an even split among those that clear the bar (most informative pick).
   const cands = pred.gameLines.map((g) => ({ ...g, side: g.over >= 0.5 ? 'over' : 'under', p: Math.max(g.over, 1 - g.over) }))
     .filter((g) => g.p < 0.999);
-  const clear = cands.filter((g) => g.p >= TENNIS_RULES.minProb).sort((x, y) => x.p - y.p);
+  const clear = cands.filter((g) => barOf('tgames', g.side) != null && g.p >= barOf('tgames', g.side)).sort((x, y) => x.p - y.p);
   const g = clear[0] || cands.sort((x, y) => y.p - x.p)[0];
   if (g) push('tgames', g.side, `${g.side === 'over' ? 'Over' : 'Under'} ${g.line} games`, g.p, { line: g.line });
   return out;

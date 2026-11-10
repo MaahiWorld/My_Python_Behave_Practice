@@ -10,13 +10,15 @@
 //  3. Every independent cross-check that has enough data agrees, at RULES.minCheck (70%) or better
 //     (or the market's own check level): season record alone, recent form alone, the prediction
 //     without live match stats (live matches), and head-to-head history (4+ meetings, before kick-off).
-//  4. The market isn't already decided (e.g. Over 1.5 once two goals are in).
+//  4. The match hasn't kicked off (RULES.preMatchOnly). In-play picks were never backtested (the
+//     historical data has no goal times or live stats) and in-play Under / BTTS picks were the ones
+//     failing in use, so once a match starts its markets show live probabilities but no picks.
 // Picks are recorded on this device and checked after full time (js/records.js, Results page).
 import { predict } from './model.js';
 import { addRecords, updateRecords, loadRecords } from './records.js';
 
 // Pick rules (checked by the backtest, backtest/RESULTS.md).
-export const RULES = { minProb: 0.8, minCheck: 0.7 };
+export const RULES = { minProb: 0.8, minCheck: 0.7, preMatchOnly: true };
 
 const yesNo = (p) => (p == null ? null : { yes: p, no: 1 - p });
 const total = (r) => r.hs + r.as;
@@ -97,7 +99,7 @@ function h2hRate(mk, side, h2h, homeId) {
 }
 
 // Evaluates every market for a match and says why each one is, or isn't, a pick.
-// status: 'pick' | 'decided' | 'low-confidence' | 'low-prob' | 'check-failed' | 'few-checks' | 'finished'
+// status: 'pick' | 'decided' | 'in-play' | 'low-confidence' | 'low-prob' | 'check-failed' | 'few-checks' | 'finished'
 export function evaluateMarkets(match, detail) {
   if (match.state === 'post') return MARKETS.map((market) => ({ market, status: 'finished' }));
   detail = detail || {};
@@ -119,6 +121,7 @@ export function evaluateMarkets(match, detail) {
     if (!best) return { market: mk, status: 'decided' };
     const { side, p } = best;
     const base = { market: mk, side, label: sideLabel(mk, side, match), p, pred: main };
+    if (live && RULES.preMatchOnly) return { ...base, status: 'in-play' };
     if (p < minProbOf(mk)) return { ...base, status: 'low-prob', need: minProbOf(mk) };
     const res = checks.map((c) => {
       const q = mk.probs(c.pred)[side];

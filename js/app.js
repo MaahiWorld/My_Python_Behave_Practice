@@ -5,7 +5,7 @@ import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
 import { MARKETS, RULES, marketPicks, evaluateMarkets, recordPicks, settlePicks, trackRecord, bestSide, sideLabel, marketById, settleFootball } from './markets.js';
 import { loadRecords, updateRecords, summarize, toCSV, saveRecords } from './records.js';
-import { fetchTennis, fetchTennisDay, predictTennis, tennisMarkets, recordTennisPicks, settleTennisPicks, settleTennisMarket, scoreState, TENNIS_MARKETS, TENNIS_RULES, demoTennis } from './tennis.js';
+import { fetchTennis, fetchTennisDay, predictTennis, tennisMarkets, recordTennisPicks, settleTennisPicks, settleTennisMarket, scoreState, TENNIS_MARKETS, TENNIS_RULES, TENNIS_PARAMS, barOf, demoTennis } from './tennis.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
@@ -453,13 +453,13 @@ function renderMarkets() {
     <div class="card section record"><h3>${esc(mk.name)} · track record</h3><p class="small">On this device: ${record}</p>${backtestLine(mk.id)}</div>
     <details class="howto"><summary>How picks are validated</summary>
       <ol>
-        <li>The match prediction must be <b>high confidence</b>: season attack/defence records and recent form for both teams, plus current match stats when live.</li>
+        <li><b>Before kick-off only.</b> Picks are made on pre-match data, which is what the backtest tested. Once a match starts, its live probabilities are still shown on the match page, but no new picks are made.</li>
+        <li>The match prediction must be <b>high confidence</b>: season attack/defence records and recent form for both teams.</li>
         <li>The model must give the pick at least <b>${Math.round((mk.minProb ?? RULES.minProb) * 100)}%</b>${mk.minProb ? ' (this market\'s own bar, set on the backtest\'s training seasons)' : ''}.</li>
-        <li>Independent cross-checks must all agree (at least ${Math.round((mk.minCheck ?? RULES.minCheck) * 100)}%): the season record alone, recent form alone, the prediction without live match stats, and head-to-head history (4+ meetings, before kick-off). At least two checks are required.</li>
-        <li>Markets already decided (e.g. Over 1.5 with two goals in, or first-half markets after half time) are left out.</li>
+        <li>Independent cross-checks must all agree (at least ${Math.round((mk.minCheck ?? RULES.minCheck) * 100)}%): the season record alone, recent form alone, and head-to-head history (4+ meetings). At least two checks are required.</li>
       </ol>
       <p class="small">Settles on: ${esc(mk.rule)}. Every pick is checked after full time on the <a href="#/results">Results</a> page.</p>
-      <p class="muted small">Covers live matches, matches starting today, and the next 7 days in the best-known competitions (free ESPN data). Statistical estimates, not betting advice.</p>
+      <p class="muted small">Covers matches starting today and the next 7 days in the best-known competitions (free ESPN data). Statistical estimates, not betting advice.</p>
     </details>
     ${list.length ? list.map(card).join('') : `<div class="empty muted">No validated ${esc(mk.name)} picks right now.${pending ? `<br>Analysing ${pending} match${pending > 1 ? 'es' : ''}…` : ''}</div>`}
     ${upcomingFixtures(mk, all)}
@@ -511,7 +511,7 @@ function whyNoPicks(mk) {
   if (!cands.length) {
     return `<div class="card section diag"><h3>Why no picks?</h3><p>No live or upcoming matches found${state.usingDemo ? ' in the demo data' : ''}.</p></div>`;
   }
-  const c = { pending: 0, failed: 0, keyed: 0, thin: 0, missing: {}, lowProb: 0, checkFailed: 0, decided: 0, fewChecks: 0, picks: 0 };
+  const c = { pending: 0, failed: 0, keyed: 0, thin: 0, missing: {}, lowProb: 0, checkFailed: 0, decided: 0, inPlay: 0, fewChecks: 0, picks: 0 };
   const near = [];
   for (const m of cands) {
     const k = keyOf(m);
@@ -526,6 +526,7 @@ function whyNoPicks(mk) {
     switch (e.status) {
       case 'pick': c.picks++; break;
       case 'decided': c.decided++; break;
+      case 'in-play': c.inPlay++; break;
       case 'low-confidence': c.thin++; for (const x of e.missing) c.missing[x] = (c.missing[x] || 0) + 1; break;
       case 'low-prob': c.lowProb++; near.push({ m, e, gap: e.need - e.p, why: `${pct(e.p)} (needs ${pct(e.need)})` }); break;
       case 'few-checks': c.fewChecks++; break;
@@ -539,6 +540,7 @@ function whyNoPicks(mk) {
     [c.checkFailed, 'reached the bar, but a cross-check disagreed'],
     [c.fewChecks, 'had too few independent checks'],
     [c.decided, 'already decided on the scoreboard'],
+    [c.inPlay, 'already in play (picks are made before kick-off only)'],
     [c.thin, 'not enough data for a high-confidence prediction'],
     [c.pending, 'still being analysed'],
     [c.failed, 'couldn\'t load their stats yet (retrying)'],
@@ -561,7 +563,7 @@ function whyNoPicks(mk) {
 
 // Every football market for one match: the model's best side and whether it's a validated pick.
 const STATUS_TXT = {
-  pick: 'validated pick', decided: 'already decided', 'low-confidence': 'not enough data', 'low-prob': 'below the bar',
+  pick: 'validated pick', decided: 'already decided', 'in-play': 'in play: picks are made before kick-off only', 'low-confidence': 'not enough data', 'low-prob': 'below the bar',
   'check-failed': 'a cross-check disagreed', 'few-checks': 'too few cross-checks', finished: 'finished',
 };
 function marketsPanel(m, d) {
@@ -582,6 +584,24 @@ function marketsPanel(m, d) {
 }
 
 // ---- Tennis page ----
+let tennisBacktest = null;
+fetch('backtest/tennis-results.json').then((r) => (r.ok ? r.json() : null)).then((j) => { tennisBacktest = j; if (route().name === 'tennis') renderTennis(); }).catch(() => {});
+const TENNIS_SIDES = { tw: ['a', 'b'], tset: ['yes', 'no'], tsets: ['over', 'under'], tgames: ['over', 'under'] };
+const TENNIS_SIDE_TXT = { yes: 'underdog wins a set', no: 'favourite in straight sets', over: 'over', under: 'under', a: 'player', b: 'player' };
+function tennisBarText(id) {
+  const bars = [...new Set(TENNIS_SIDES[id].map((sd) => barOf(id, sd)))];
+  if (bars.every((b) => b == null)) return 'No picks for this market: in the backtest no confidence bar gave 80 correct in 100, so it shows probabilities only.';
+  const parts = TENNIS_SIDES[id].map((sd) => [sd, barOf(id, sd)]);
+  const txt = id === 'tw' ? `the model at ${pct(parts[0][1])}+` : parts.map(([sd, b]) => `${TENNIS_SIDE_TXT[sd]}: ${b == null ? 'no picks' : `${pct(b)}+`}`).join(' · ');
+  return `Picks need ${txt}, both players ranked inside the top ${TENNIS_PARAMS.maxRank}, and are made before the match only.`;
+}
+function tennisBacktestLine(id) {
+  const t = tennisBacktest?.test, o = tennisBacktest?.testOriginal;
+  if (!t) return '';
+  const now = t.picks[id], was = o?.picks?.[id];
+  const f = (x) => (x ? `<b>${Math.round(x.hitRate)} of 100</b> correct (${x.won.toLocaleString()} of ${x.picks.toLocaleString()})` : 'no picks');
+  return `<p class="small">Backtest on ATP ${tennisBacktest.data.test} (${t.matches.toLocaleString()} matches the settings never saw): ${f(now)}${was ? `; the previous model: ${f(was)}` : ''}. <a href="https://github.com/MaahiWorld/My_Python_Behave_Practice/blob/main/backtest/TENNIS.md" target="_blank" rel="noopener">Details</a></p>`;
+}
 let tennisPromise = null;
 function loadTennis(force = false) {
   if (tennisPromise) return tennisPromise;
@@ -652,7 +672,7 @@ function renderTennis() {
   const pickCard = ({ m, x }) => `<div class="card pick">
       <div class="pick-top"><span class="lg-line">${esc(m.event)}${m.round ? ` · ${esc(m.round)}` : ''}</span><span class="status ${m.state === 'in' ? 'live' : ''}">${esc(tStatus(m))}</span></div>
       <div class="pick-teams">${esc(m.a.short)} ${rk(m.a)} vs ${esc(m.b.short)} ${rk(m.b)}${m.state === 'in' ? ` · <b>${esc(setsTxt(m))}</b>` : ''}</div>
-      <div class="pick-main"><span class="pick-label yes">${esc(x.label)}</span><span class="pick-p">${pct(x.p)}</span><span class="badge ready">Model only · untested</span></div>
+      <div class="pick-main"><span class="pick-label yes">${esc(x.label)}</span><span class="pick-p">${pct(x.p)}</span><span class="badge ready">${m.tour === 'wta' ? 'WTA · not backtested' : 'ATP · backtested'}</span></div>
     </div>`;
   const banner = state.tennisDemo ? '<div class="banner">Showing <b>demo tennis matches</b> (fictional players). Turn off demo mode in ⚙ for the live ATP/WTA feed.</div>'
     : state.tennisError ? `<div class="banner">Couldn't load tennis (${esc(state.tennisError)}). ${all.length ? 'Showing the last list.' : 'Check your connection or set a CORS proxy in ⚙.'}</div>` : '';
@@ -660,16 +680,18 @@ function renderTennis() {
     <div class="tabs wrap" role="tablist">${TENNIS_MARKETS.map((x) => `<button class="tab" role="tab" data-tmarket="${x.id}" aria-selected="${x.id === mk.id}">${esc(x.tab)}<span class="count">${picks.filter((a) => a.x.market === x.id).length}</span></button>`).join('')}</div>
     <div class="card section record"><h3>${esc(mk.name)} · picks</h3>
       <p class="small">On this device: ${done.length ? `<b>${won} of ${done.length}</b> correct (${Math.round((won / done.length) * 100)}%)` : 'no settled picks yet'}${recs.length - done.length ? ` · ${recs.length - done.length} awaiting a result` : ''}. <a href="#/results">Check results</a></p>
-      <p class="small muted">Experimental: picks need the model at ${pct(TENNIS_RULES.minProb)}+, and both players ranked. Unlike football there are no independent cross-checks and no backtest yet, so treat the first weeks of results as the test.</p></div>
+      <p class="small muted">${tennisBarText(mk.id)}</p>${tennisBacktestLine(mk.id)}</div>
     ${shown.length ? shown.map(pickCard).join('') : `<div class="empty muted">${!state.tennisAt && !all.length ? 'Loading ATP and WTA matches…' : `No ${esc(mk.name.toLowerCase())} picks right now.`}</div>`}
     <details class="howto"><summary>How tennis predictions work</summary>
       <ol>
-        <li>Each player's world ranking gives a pre-match win chance over best of 3: 1 ÷ (1 + (rank A ÷ rank B)<sup>0.5</sup>). For example #3 vs #41 → 79%.</li>
-        <li>That chance is turned into how often each player wins a point on serve (around 64% on the ATP tour, 56% on the WTA tour, plus or minus the gap).</li>
+        <li>Each player's world ranking gives a pre-match win chance over best of 3: 1 ÷ (1 + (rank A ÷ rank B)<sup>${TENNIS_PARAMS.rankPower}</sup>).</li>
+        <li>That chance is turned into how often each player wins a point on serve (around ${Math.round(TENNIS_PARAMS.serveBase.atp * 100)}% on the ATP tour, ${Math.round(TENNIS_PARAMS.serveBase.wta * 100)}% on the WTA tour, higher on grass and lower on clay, judged from the tournament name and month).</li>
+        <li>Players don't play at the same level every day, so the model averages over good and bad days. This is what makes straight-set wins and short matches as common as they really are; without it the model expected too many long, close matches.</li>
         <li>A point → game → set → match model (tiebreak at 6–6) then gives every market: the winner, whether the underdog takes a set, the number of sets and the number of games (a tiebreak counts as one game). Best of 5 is used for men's Grand Slam singles.</li>
-        <li>Live, the model restarts from the current set and game score, so a player a set and a break up is rated accordingly.</li>
+        <li>Set and games probabilities are then recalibrated on past ATP matches, and each market only gives a pick above the bar where past picks landed at least 80% of the time. Markets or sides with no such bar give no picks.</li>
+        <li>Picks are made before the first ball only. Live, the model restarts from the current set and game score and shows the probabilities, but makes no picks.</li>
       </ol>
-      <p class="small muted">Not used, because the free feed doesn't provide them: serve/return statistics, surface form, fatigue, injuries, head-to-head. Retirements and walkovers are void.</p>
+      <p class="small muted">Not used, because the free feed doesn't provide them: each player's own serve/return record, surface form, fatigue, injuries, head-to-head, bookmaker odds. Retirements and walkovers are void.</p>
     </details>
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" data-ttab="${k}" aria-selected="${state.tennisTab === k}">${l}<span class="count">${cnt(k)}</span></button>`).join('')}</div>
     ${list.length ? list.map(tennisCard).join('') : `<div class="empty muted">${state.tennisAt || state.tennisDemo ? 'No singles matches in the ATP/WTA feed for this filter.' : 'Loading…'}</div>`}

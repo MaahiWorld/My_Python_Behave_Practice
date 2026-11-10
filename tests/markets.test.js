@@ -48,12 +48,19 @@ test('a pick is dropped when an independent check disagrees', () => {
     'full model alone gives Over 1.5 ~85%, but recent form alone is only ~60%, below the 70% check, so no pick');
 });
 
-test('decided markets are left out of live picks', () => {
+test('picks are made before kick-off only; live markets are decided or in play', async () => {
+  const { evaluateMarkets } = await import('../js/markets.js');
   const live = { ...pre, state: 'in', minute: 60, phase: 'H2', home: T('h', 1), away: T('a', 1) };
   const stats = { shotsOnTarget: 5, shots: 12, corners: 5, possession: 50 };
-  const picks = marketPicks(live, { ...open, liveStats: { home: stats, away: stats } });
-  assert.ok(!picks.some((p) => p.market.id === 'o15'), 'Over 1.5 already landed');
-  assert.ok(!picks.some((p) => p.market.id === 'btts'), 'BTTS already landed');
+  const d = { ...open, liveStats: { home: stats, away: stats } };
+  assert.deepEqual(marketPicks(live, d), [], 'no in-play picks');
+  const ev = evaluateMarkets(live, d);
+  assert.equal(ev.find((e) => e.market.id === 'o15').status, 'decided', 'Over 1.5 already landed');
+  assert.equal(ev.find((e) => e.market.id === 'btts').status, 'decided', 'BTTS already landed');
+  const o25 = ev.find((e) => e.market.id === 'o25');
+  assert.equal(o25.status, 'in-play');
+  assert.ok(o25.p > 0 && o25.p < 1, 'live probability still shown');
+  assert.ok(marketPicks(pre, open).length > 0, 'the same fixture gives picks before kick-off');
 });
 
 test('picks are recorded once and settled at full time', () => {

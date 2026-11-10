@@ -77,3 +77,47 @@ test('parses the ESPN tennis scoreboard (singles only) and rankings', () => {
   assert.equal(T.settleTennisMarket({ market: 'tsets', side: 'under', line: 2.5 }, ms[1]).result, 'won');
   assert.deepEqual(T.parseRankings({ rankings: [{ ranks: [{ current: 1, athlete: { id: 'x' } }, { current: 2, athlete: { id: 'p2' } }] }] }), { x: 1, p2: 2 });
 });
+
+test('day-to-day form keeps the win chance but makes straight sets more common', () => {
+  const saved = T.TENNIS_PARAMS.dayForm;
+  try {
+    T.TENNIS_PARAMS.dayForm = 0;
+    const flat = T.predictTennis(M({ a: P('A', 10), b: P('B', 30) }));
+    T.TENNIS_PARAMS.dayForm = 0.04;
+    const mix = T.predictTennis(M({ a: P('A', 10), b: P('B', 30) }));
+    assert.ok(Math.abs(mix.pA - flat.pA) < 0.002, 'win chance still matches the rankings');
+    assert.ok(mix.dist.sets[2] > flat.dist.sets[2], 'more two-set matches');
+    const sum = (o) => Object.values(o).reduce((s, v) => s + v, 0);
+    assert.ok(Math.abs(sum(mix.dist.games) - 1) < 1e-9);
+  } finally { T.TENNIS_PARAMS.dayForm = saved; }
+});
+
+test('surface from the tournament name and month', () => {
+  assert.equal(T.surfaceOf('Roland Garros', '2026-05-30'), 'Clay');
+  assert.equal(T.surfaceOf('Mutua Madrid Open', '2026-05-01'), 'Clay');
+  assert.equal(T.surfaceOf('Wimbledon', '2026-07-01'), 'Grass');
+  assert.equal(T.surfaceOf('Terra Wortmann Open', '2026-06-20'), 'Grass');
+  assert.equal(T.surfaceOf('Stuttgart', '2026-04-20'), 'Hard', 'Stuttgart in April is not the grass event');
+  assert.equal(T.surfaceOf('US Open', '2026-09-01'), 'Hard');
+  assert.ok(T.serveLevel('atp', 'Grass') > T.serveLevel('atp', 'Clay'));
+});
+
+test('per-market bars: null means the market gives no picks, and none are made in play', () => {
+  const saved = JSON.parse(JSON.stringify(T.TENNIS_RULES.markets));
+  try {
+    T.TENNIS_RULES.markets = { tgames: null, tw: { a: 0.6 } };
+    const mk = T.tennisMarkets(M({ a: P('A', 1), b: P('B', 150) }));
+    assert.equal(mk.find((x) => x.market === 'tgames').status, 'low-prob');
+    assert.equal(mk.find((x) => x.market === 'tw').status, 'pick');
+    assert.equal(T.barOf('tset', 'yes'), T.TENNIS_RULES.minProb);
+    const live = T.tennisMarkets(M({ state: 'in', a: P('A', 1, [3]), b: P('B', 150, [2]) }));
+    assert.equal(live.find((x) => x.market === 'tw').status, 'in-play');
+  } finally { T.TENNIS_RULES.markets = saved; }
+});
+
+test('backtest score parser', async () => {
+  const { parseScore } = await import('../backtest/tennis-lib.js');
+  assert.deepEqual(parseScore('6-4 6-7(2) 7-6(5)'), [[6, 4], [6, 7], [7, 6]]);
+  assert.equal(parseScore('6-4 2-1 RET'), null);
+  assert.equal(parseScore('W/O'), null);
+});

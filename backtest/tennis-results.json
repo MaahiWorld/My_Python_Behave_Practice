@@ -1,0 +1,550 @@
+{
+  "generated": "2026-11-10T06:47:22.201Z",
+  "data": {
+    "source": "TML-Database (ATP main tour)",
+    "train": "2019-2023",
+    "test": "2024-2026"
+  },
+  "settings": {
+    "params": {
+      "serveBase": {
+        "atp": 0.65,
+        "wta": 0.56
+      },
+      "surface": {
+        "Hard": 0,
+        "Clay": -0.02,
+        "Grass": 0.015
+      },
+      "rankPower": 0.5,
+      "dayForm": 0.045,
+      "calib": {
+        "tset": [
+          -0.015,
+          1.052
+        ],
+        "tsets": [
+          0.049,
+          1.066
+        ],
+        "tgames": [
+          -0.031,
+          1.041
+        ]
+      },
+      "maxRank": 400
+    },
+    "rules": {
+      "minProb": 0.75,
+      "markets": {
+        "tw": 0.75,
+        "tgames": {
+          "over": 0.8,
+          "under": 0.8
+        },
+        "tset": null,
+        "tsets": null
+      },
+      "preMatchOnly": true
+    }
+  },
+  "test": {
+    "matches": 5779,
+    "logLoss": {
+      "tw": 0.6289,
+      "tset": 0.6525,
+      "tsets": 0.654,
+      "tgames": 0.5844
+    },
+    "picks": {
+      "tgames": {
+        "picks": 4568,
+        "won": 4213,
+        "said": 90.9,
+        "bySide": {
+          "over": {
+            "n": 4451,
+            "won": 4110
+          },
+          "under": {
+            "n": 117,
+            "won": 103
+          }
+        },
+        "hitRate": 92.2
+      },
+      "tw": {
+        "picks": 724,
+        "won": 600,
+        "said": 81.1,
+        "bySide": {
+          "b": {
+            "n": 362,
+            "won": 296
+          },
+          "a": {
+            "n": 362,
+            "won": 304
+          }
+        },
+        "hitRate": 82.9
+      }
+    }
+  },
+  "testOriginal": {
+    "matches": 5779,
+    "logLoss": {
+      "tw": 0.6281,
+      "tset": 0.6663,
+      "tsets": 0.683,
+      "tgames": 0.6221
+    },
+    "picks": {
+      "tgames": {
+        "picks": 5398,
+        "won": 4101,
+        "said": 85.6,
+        "bySide": {
+          "over": {
+            "n": 5366,
+            "won": 4073
+          },
+          "under": {
+            "n": 32,
+            "won": 28
+          }
+        },
+        "hitRate": 76
+      },
+      "tw": {
+        "picks": 787,
+        "won": 653,
+        "said": 81.7,
+        "bySide": {
+          "b": {
+            "n": 384,
+            "won": 311
+          },
+          "a": {
+            "n": 403,
+            "won": 342
+          }
+        },
+        "hitRate": 83
+      },
+      "tset": {
+        "picks": 604,
+        "won": 445,
+        "said": 82.1,
+        "bySide": {
+          "yes": {
+            "n": 604,
+            "won": 445
+          }
+        },
+        "hitRate": 73.7
+      }
+    }
+  },
+  "train": {
+    "matches": 12334,
+    "logLoss": {
+      "tw": 0.6279,
+      "tset": 0.6521,
+      "tsets": 0.6583,
+      "tgames": 0.5926
+    },
+    "picks": {
+      "tgames": {
+        "picks": 9664,
+        "won": 8747,
+        "said": 90.9,
+        "bySide": {
+          "over": {
+            "n": 9370,
+            "won": 8501
+          },
+          "under": {
+            "n": 294,
+            "won": 246
+          }
+        },
+        "hitRate": 90.5
+      },
+      "tw": {
+        "picks": 1529,
+        "won": 1259,
+        "said": 81.2,
+        "bySide": {
+          "a": {
+            "n": 770,
+            "won": 635
+          },
+          "b": {
+            "n": 759,
+            "won": 624
+          }
+        },
+        "hitRate": 82.3
+      }
+    }
+  },
+  "barScan": {
+    "train": {
+      "tgames|over|0.6": {
+        "n": 11510,
+        "won": 7904
+      },
+      "tgames|under|0.6": {
+        "n": 11835,
+        "won": 7546
+      },
+      "tgames|over|0.65": {
+        "n": 11288,
+        "won": 8602
+      },
+      "tgames|under|0.65": {
+        "n": 11655,
+        "won": 7980
+      },
+      "tgames|over|0.7": {
+        "n": 10708,
+        "won": 8357
+      },
+      "tgames|over|0.75": {
+        "n": 9674,
+        "won": 7881
+      },
+      "tgames|over|0.8": {
+        "n": 9396,
+        "won": 8523
+      },
+      "tgames|over|0.85": {
+        "n": 9162,
+        "won": 8392
+      },
+      "tgames|over|0.9": {
+        "n": 7919,
+        "won": 7279
+      },
+      "tgames|under|0.7": {
+        "n": 3534,
+        "won": 2527
+      },
+      "tgames|under|0.75": {
+        "n": 1024,
+        "won": 821
+      },
+      "tgames|under|0.8": {
+        "n": 309,
+        "won": 259
+      },
+      "tgames|under|0.85": {
+        "n": 66,
+        "won": 62
+      },
+      "tgames|under|0.9": {
+        "n": 3,
+        "won": 3
+      },
+      "tset|yes|0.6": {
+        "n": 6772,
+        "won": 4498
+      },
+      "tsets|under|0.6": {
+        "n": 9625,
+        "won": 6119
+      },
+      "tw|a|0.6": {
+        "n": 3129,
+        "won": 2236
+      },
+      "tw|a|0.65": {
+        "n": 2147,
+        "won": 1618
+      },
+      "tset|yes|0.65": {
+        "n": 4165,
+        "won": 2832
+      },
+      "tw|b|0.6": {
+        "n": 3231,
+        "won": 2291
+      },
+      "tw|b|0.65": {
+        "n": 2149,
+        "won": 1615
+      },
+      "tw|a|0.7": {
+        "n": 1334,
+        "won": 1053
+      },
+      "tw|a|0.75": {
+        "n": 770,
+        "won": 635
+      },
+      "tset|no|0.6": {
+        "n": 622,
+        "won": 421
+      },
+      "tsets|under|0.65": {
+        "n": 1924,
+        "won": 1317
+      },
+      "tsets|under|0.7": {
+        "n": 564,
+        "won": 427
+      },
+      "tw|b|0.7": {
+        "n": 1326,
+        "won": 1049
+      },
+      "tw|b|0.75": {
+        "n": 759,
+        "won": 624
+      },
+      "tw|b|0.8": {
+        "n": 398,
+        "won": 339
+      },
+      "tw|b|0.85": {
+        "n": 176,
+        "won": 160
+      },
+      "tset|no|0.65": {
+        "n": 314,
+        "won": 211
+      },
+      "tset|no|0.7": {
+        "n": 142,
+        "won": 101
+      },
+      "tsets|under|0.75": {
+        "n": 155,
+        "won": 121
+      },
+      "tw|a|0.8": {
+        "n": 401,
+        "won": 345
+      },
+      "tw|a|0.85": {
+        "n": 162,
+        "won": 148
+      },
+      "tw|a|0.9": {
+        "n": 49,
+        "won": 48
+      },
+      "tset|no|0.75": {
+        "n": 44,
+        "won": 34
+      },
+      "tset|yes|0.7": {
+        "n": 1042,
+        "won": 747
+      },
+      "tset|yes|0.75": {
+        "n": 570,
+        "won": 414
+      },
+      "tw|b|0.9": {
+        "n": 43,
+        "won": 41
+      },
+      "tsets|under|0.8": {
+        "n": 29,
+        "won": 24
+      },
+      "tset|no|0.8": {
+        "n": 9,
+        "won": 9
+      },
+      "tsets|under|0.85": {
+        "n": 5,
+        "won": 5
+      },
+      "tset|no|0.85": {
+        "n": 1,
+        "won": 1
+      }
+    },
+    "test": {
+      "tgames|over|0.6": {
+        "n": 5318,
+        "won": 3734
+      },
+      "tgames|under|0.6": {
+        "n": 5458,
+        "won": 3455
+      },
+      "tgames|over|0.65": {
+        "n": 5215,
+        "won": 4060
+      },
+      "tgames|under|0.65": {
+        "n": 5377,
+        "won": 3668
+      },
+      "tgames|over|0.7": {
+        "n": 4993,
+        "won": 3973
+      },
+      "tgames|over|0.75": {
+        "n": 4580,
+        "won": 3794
+      },
+      "tgames|over|0.8": {
+        "n": 4462,
+        "won": 4120
+      },
+      "tgames|over|0.85": {
+        "n": 4352,
+        "won": 4050
+      },
+      "tgames|over|0.9": {
+        "n": 3719,
+        "won": 3469
+      },
+      "tgames|under|0.7": {
+        "n": 1679,
+        "won": 1224
+      },
+      "tgames|under|0.75": {
+        "n": 457,
+        "won": 372
+      },
+      "tgames|under|0.8": {
+        "n": 122,
+        "won": 108
+      },
+      "tgames|under|0.85": {
+        "n": 26,
+        "won": 24
+      },
+      "tgames|under|0.9": {
+        "n": 1,
+        "won": 1
+      },
+      "tw|a|0.6": {
+        "n": 1492,
+        "won": 1062
+      },
+      "tsets|under|0.6": {
+        "n": 4554,
+        "won": 2912
+      },
+      "tw|b|0.6": {
+        "n": 1477,
+        "won": 1049
+      },
+      "tw|b|0.65": {
+        "n": 1027,
+        "won": 774
+      },
+      "tset|yes|0.6": {
+        "n": 3046,
+        "won": 2021
+      },
+      "tset|yes|0.65": {
+        "n": 1826,
+        "won": 1254
+      },
+      "tw|a|0.65": {
+        "n": 1002,
+        "won": 764
+      },
+      "tw|a|0.7": {
+        "n": 630,
+        "won": 508
+      },
+      "tsets|under|0.65": {
+        "n": 965,
+        "won": 660
+      },
+      "tw|b|0.7": {
+        "n": 642,
+        "won": 506
+      },
+      "tw|b|0.75": {
+        "n": 362,
+        "won": 296
+      },
+      "tset|no|0.6": {
+        "n": 300,
+        "won": 203
+      },
+      "tsets|under|0.7": {
+        "n": 267,
+        "won": 202
+      },
+      "tw|a|0.75": {
+        "n": 362,
+        "won": 304
+      },
+      "tw|a|0.8": {
+        "n": 174,
+        "won": 156
+      },
+      "tw|a|0.85": {
+        "n": 72,
+        "won": 70
+      },
+      "tset|no|0.65": {
+        "n": 147,
+        "won": 106
+      },
+      "tset|no|0.7": {
+        "n": 57,
+        "won": 42
+      },
+      "tsets|under|0.75": {
+        "n": 63,
+        "won": 52
+      },
+      "tw|b|0.8": {
+        "n": 196,
+        "won": 169
+      },
+      "tw|b|0.85": {
+        "n": 72,
+        "won": 63
+      },
+      "tw|b|0.9": {
+        "n": 24,
+        "won": 23
+      },
+      "tset|yes|0.7": {
+        "n": 400,
+        "won": 306
+      },
+      "tset|yes|0.75": {
+        "n": 236,
+        "won": 180
+      },
+      "tset|no|0.75": {
+        "n": 18,
+        "won": 17
+      },
+      "tsets|under|0.8": {
+        "n": 15,
+        "won": 14
+      },
+      "tw|a|0.9": {
+        "n": 18,
+        "won": 18
+      }
+    },
+    "chosen": {
+      "tgames": {
+        "over": 0.8,
+        "under": 0.8
+      },
+      "tw": {
+        "a": 0.75,
+        "b": 0.75
+      }
+    },
+    "target": 0.82,
+    "minPicks": 40
+  }
+}

@@ -21,8 +21,8 @@ test('point → game → set → match chain is consistent', () => {
 
 test('ranking calibration reproduces the pre-match chance', () => {
   const p = T.rankWinProb(5, 60);
-  const { pa, pb } = T.calibrate(p, 'atp');
-  assert.ok(Math.abs(T.matchDist(pa, pb, 3).pA - p) < 0.001);
+  const c = T.calibrate(p, 'atp');
+  assert.ok(Math.abs(T.matchDistMix(c.s, c.d, 3).pA - p) < 0.002, 'allowing for day-to-day form');
   assert.equal(T.rankWinProb(null, 3), null);
 });
 

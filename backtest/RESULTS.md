@@ -2,6 +2,39 @@
 
 Run on 2026-11-08 with `backtest/fetch-data.sh` + `backtest/run.js`; full figures in `results.json`.
 
+## Pre-match only (2026-11-10)
+
+Picks are now made **before kick-off only** (`RULES.preMatchOnly` in `js/markets.js`). Every figure in
+this file is pre-match; in-play picks were never backtested (the historical data has no goal times or
+live stats), and in-play Under / BTTS picks were the ones failing in use. Live probabilities are still
+shown on match pages.
+
+Why Under 2.5 and BTTS give no pre-match picks (all high-confidence matches, hit rate when the model
+rated the side at least this high):
+
+| Side | 55%+ | 60%+ | 65%+ |
+| --- | --- | --- | --- |
+| Under 2.5, unseen seasons | 55.2 (707) | 52.1 (71) | 50.0 (2) |
+| BTTS Yes, unseen seasons | 57.9 (1,877) | 59.8 (219) | 55.6 (9) |
+| BTTS No, unseen seasons | 65.6 (32) | – | – |
+
+A stronger team model was also tried for these markets: opponent-adjusted, time-weighted attack and
+defence ratings fitted on every earlier league match (Dixon-Coles style). On unseen seasons it moved
+log loss by at most 0.002 and accuracy by under 1 point (Over 2.5 55.5 → 56.3; BTTS 54.9 → 54.8), so
+it isn't used. Results and tables alone don't carry enough information to predict these markets
+well; see "What would raise accuracy" below.
+
+## What would raise accuracy
+
+In order of expected gain, none of which the free ESPN feed provides:
+
+1. **Bookmaker odds** (opening and closing prices). The market price is the strongest single
+   predictor of a match and would also allow the app to measure value, not just hit rate.
+2. **Expected goals (xG) and shot data** per team and match: far better than goals at telling a lucky
+   team from a good one, and the main input for Under / BTTS.
+3. **Confirmed line-ups, injuries and suspensions**, about an hour before kick-off.
+4. **Full fixture history for every team** (Elo / pi-ratings), and more leagues of backtest data.
+
 ## Data and method
 
 - **25,056 finished matches** from 12 European leagues (England 1–2, Germany, Spain, Italy, France,

@@ -4,7 +4,7 @@
 // Writes backtest/tennis-results.json.
 import { writeFileSync } from 'node:fs';
 import { loadTennis, TRAIN_YEARS } from './tennis-lib.js';
-import { TENNIS_PARAMS, TENNIS_RULES } from '../js/tennis.js';
+import { TENNIS_PARAMS, TENNIS_RULES, predictTennis } from '../js/tennis.js';
 import { evaluate, pickTable } from './tennis-eval.js';
 
 // The model as first shipped (rank-based, no day-to-day form, no surface, no recalibration, 75% bar).
@@ -27,18 +27,30 @@ const train = all.filter((m) => TRAIN_YEARS.includes(m.year)), test = all.filter
 function barScan(matches) {
   const ev = withSettings({ params: {}, rules: { minProb: 0.5, markets: {} } }, () => evaluate(matches, { picks: true }));
   const out = {};
-  for (const { pk, won, m } of ev.picks) {
-    if (pk.status === 'low-confidence') continue;
+  const add = (k, won) => { const o = out[k] || (out[k] = { n: 0, won: 0 }); o.n++; o.won += won; };
+  // Total games: the line offered depends on the bar (closest to even among the lines that clear it),
+  // so each bar is scanned with its own line choice.
+  for (const m of matches) {
+    const p = predictTennis({ ...m, state: 'pre' });
+    if (p.confidence.level === 'Low') continue;
+    const games = m.a.sets.reduce((s, x, i) => s + x.games + m.b.sets[i].games, 0);
+    for (const bar of [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]) {
+      for (const side of ['over', 'under']) {
+        const c = p.gameLines.map((g) => ({ line: g.line, p: side === 'over' ? g.over : 1 - g.over })).filter((g) => g.p >= bar && g.p < 0.999).sort((x, y) => x.p - y.p)[0];
+        if (c) add(`tgames|${side}|${bar}`, (side === 'over') === games > c.line);
+      }
+    }
+  }
+  for (const { pk, won } of ev.picks) {
+    if (pk.status === 'low-confidence' || pk.market === 'tgames') continue;
     for (const bar of [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]) {
       if (pk.p < bar) continue;
-      const k = `${pk.market}|${pk.side}|${bar}`;
-      const o = out[k] || (out[k] = { n: 0, won: 0 });
-      o.n++; o.won += won;
+      add(`${pk.market}|${pk.side}|${bar}`, won);
     }
   }
   return out;
 }
-const TARGET = 0.8, MIN_PICKS = 40;
+const TARGET = 0.82, MIN_PICKS = 40; // same target as the football pick bars
 function chooseBars(scan) {
   const bars = {};
   for (const [k, o] of Object.entries(scan)) {

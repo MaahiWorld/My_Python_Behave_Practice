@@ -41,31 +41,40 @@ results, including where the model adds little, in [backtest/RESULTS.md](backtes
 
 The **Markets** page lists picks for six football markets: Over 1.5, Over 2.5, Both teams to score
 (and their Under/No sides), **Full-time result (1X2)** (settled on the 90-minute score), and
-**1st half Over 0.5 / Over 1.5 goals**, for live matches, matches starting today, and the next 7 days of fixtures in about
+**1st half Over 0.5 / Over 1.5 goals**, for matches starting today and the next 7 days of fixtures in about
 30 of the best-known competitions (top European leagues, UEFA competitions, major cups, MLS, Liga MX,
 Brazil, Argentina, Saudi Pro League, internationals). An **Upcoming fixtures** section shows every
 high-confidence fixture with its Over 1.5 / Over 2.5 / BTTS chances, grouped by day. A pick appears only when:
 
-1. the match prediction is high confidence;
-2. the model gives it at least 80% (1X2: 75%; 1st half Over 0.5: 78%; 1st half Over 1.5: 85%, set on the backtest's training seasons);
-3. independent cross-checks all agree at 70%+ (1X2: 50%+): the season record alone, recent form alone, the
-   prediction without live match stats, and head-to-head history (4+ meetings, before kick-off),
-   with at least two checks required;
-4. the market isn't already decided (first-half markets close at half time).
+1. the match hasn't kicked off. **Picks are pre-match only**: in-play picks were never backtested (the
+   historical data has no goal times or live stats), and in-play Under / BTTS picks were the ones
+   failing in use. Live probabilities are still shown on each match page;
+2. the match prediction is high confidence;
+3. the model gives it at least 80% (1X2: 75%; 1st half Over 0.5: 78%; 1st half Over 1.5: 85%, set on the backtest's training seasons);
+4. independent cross-checks all agree at 70%+ (1X2: 50%+): the season record alone, recent form alone
+   and head-to-head history (4+ meetings), with at least two checks required.
+
+Under 2.5 and Both teams to score never give a pick before kick-off: on 25,000 past matches the
+model's best Under 2.5 calls landed about 55 times in 100 and its best BTTS calls about 58 times in 100.
+Results and league tables alone can't predict those markets better (see backtest/RESULTS.md).
 
 Backtested on unseen seasons: 1X2 picks 84.1% correct (122 of 145), 1st half Over 0.5 picks 81.5%
 (190 of 233). Each match page also has a **Markets for this match** panel with the most likely side of
 every market and why it is or isn't a pick.
 
-## Tennis page (experimental)
+## Tennis page
 
 ATP and WTA singles from the free ESPN feed, with four markets: **match winner**, **underdog to win at
 least one set** (or favourite in straight sets), **total sets** (Over/Under 2.5, or 3.5 in best of 5)
 and **total games**. Each player's world ranking gives a pre-match chance (1 ÷ (1 + (rank A ÷ rank
 B)^0.5) over best of 3), which is turned into serve-point strengths for a point → game → set → match
-model; live, the model restarts from the current set and game score (`js/tennis.js`). A pick needs
-75%+ and both players ranked (top 400). There are no cross-checks and **no backtest yet** (no free
-historical tennis data was reachable), so the Results page is where tennis earns its track record.
+model, averaged over day-to-day form, with surface (from the tournament name and month) setting how
+dominant serve is (`js/tennis.js`). Picks are **pre-match only**. Backtested on 18,000 ATP matches
+(fitted on 2019–2023, scored on 2024–2026): match-winner picks 82.9% correct (600 of 724), total-games
+picks 92.2% (4,213 of 4,568, up from 76.0% before this model; mostly Over 16.5 in best of 3, which
+bookmakers price very short). Underdog to win a set and total sets give **no picks**: no bar reached 82
+in 100. WTA uses the same settings and isn't backtested. Details in
+[backtest/TENNIS.md](backtest/TENNIS.md).
 
 ## Results page
 
@@ -157,6 +166,7 @@ js/demo.js            Offline demo data
 js/sources.js         Paid/keyed data source adapters + registry
 js/markets.js         Football markets (O1.5/O2.5/BTTS/1X2/1st half), validation, settlement
 js/tennis.js          Tennis model, ESPN tennis parser, tennis markets
+backtest/tennis-*.js  Tennis backtest (TML-Database ATP results): fetch-tennis.sh, tennis-tune.js, tennis-run.js
 js/records.js         Stored picks and results (Results page)
 js/merge.js           Merging and de-duplicating matches across sources
 sw.js                 Service worker (offline app shell)

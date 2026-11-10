@@ -15,18 +15,20 @@ import { BASE, getJSON, cached, num, ymd } from './api.js';
 import { addRecords, updateRecords } from './records.js';
 
 export const TENNIS_PARAMS = {
-  serveBase: { atp: 0.64, wta: 0.56 }, // average share of service points won (hard court)
-  surface: { Hard: 0, Clay: -0.015, Grass: 0.015 }, // added to serveBase
+  serveBase: { atp: 0.65, wta: 0.56 }, // average share of service points won (hard court)
+  surface: { Hard: 0, Clay: -0.02, Grass: 0.015 }, // added to serveBase
   rankPower: 0.5, // P(A beats B, best of 3) = 1 / (1 + (rankA / rankB)^power)
-  dayForm: 0, // spread (sd) of the serve-strength gap from one day to the next
+  dayForm: 0.045, // spread (sd) of the serve-strength gap from one day to the next
   // Pre-match only: logistic recalibration p' = sigmoid(a + b·logit p), per market (yes / over side).
-  calib: {},
+  calib: { tset: [-0.015, 1.052], tsets: [0.049, 1.066], tgames: [-0.031, 1.041] },
   maxRank: 400, // beyond this, rankings say too little for a pick
 };
 // Bars: the model's probability a pick needs, per market (null = no picks for that market).
 // Picks are made before the first ball only (the backtest tests pre-match predictions; live
 // probabilities are still shown).
-export const TENNIS_RULES = { minProb: 0.75, markets: {}, preMatchOnly: true };
+// Chosen on 2019–2023 as the lowest bar that kept at least 82 of 100 picks correct with 40+ picks
+// (backtest/TENNIS.md). "Underdog wins a set" and total sets never reached that: no picks.
+export const TENNIS_RULES = { minProb: 0.75, markets: { tw: 0.75, tgames: { over: 0.8, under: 0.8 }, tset: null, tsets: null }, preMatchOnly: true };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v * 1e12) / 1e12)); // rounding: mixtures sum to 1 ± 1e-16
 

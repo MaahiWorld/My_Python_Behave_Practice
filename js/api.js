@@ -10,6 +10,7 @@ const NAMED = [
   ['tur.1', 'Süper Lig'], ['bel.1', 'Belgian Pro League'], ['usa.1', 'MLS'], ['mex.1', 'Liga MX'], ['bra.1', 'Brasileirão'],
   ['arg.1', 'Liga Profesional'], ['ksa.1', 'Saudi Pro League'], ['eng.fa', 'FA Cup'], ['esp.copa_del_rey', 'Copa del Rey'],
   ['conmebol.libertadores', 'Copa Libertadores'], ['fifa.world', 'World Cup'], ['uefa.euro', 'Euro'], ['fifa.friendly', 'International Friendlies'],
+  ['uefa.nations', 'Nations League'],
 ];
 const MORE = [
   // Europe
@@ -18,7 +19,7 @@ const MORE = [
   'fra.2', 'fra.coupe_de_france', 'ned.2', 'ned.cup', 'por.2', 'gre.1', 'aut.1', 'sui.1', 'den.1', 'nor.1', 'swe.1', 'fin.1',
   'isl.1', 'rus.1', 'ukr.1', 'pol.1', 'cze.1', 'svk.1', 'hun.1', 'rou.1', 'bul.1', 'srb.1', 'cro.1', 'svn.1', 'bih.1',
   'cyp.1', 'isr.1', 'kaz.1', 'aze.1', 'geo.1', 'arm.1', 'alb.1', 'mkd.1', 'mne.1', 'lux.1', 'mlt.1', 'est.1', 'lva.1', 'ltu.1', 'blr.1', 'mda.1',
-  'uefa.super_cup', 'uefa.nations', 'uefa.euroq', 'uefa.champions_qual', 'uefa.europa_qual', 'uefa.europa.conf_qual', 'uefa.wchampions', 'uefa.youth_league',
+  'uefa.super_cup', 'uefa.euroq', 'uefa.champions_qual', 'uefa.europa_qual', 'uefa.europa.conf_qual', 'uefa.wchampions', 'uefa.youth_league',
   // Americas
   'usa.open', 'usa.usl.1', 'usa.usl.l1', 'usa.nwsl', 'can.1', 'mex.2', 'bra.2', 'bra.3', 'bra.copa_do_brazil', 'arg.2', 'arg.copa',
   'chi.1', 'col.1', 'col.2', 'per.1', 'uru.1', 'par.1', 'ecu.1', 'bol.1', 'ven.1', 'crc.1', 'hon.1', 'gua.1', 'slv.1', 'pan.1', 'jam.1',
@@ -318,11 +319,12 @@ export async function cached(key, ttl, fn) {
 // with a live match or one kicking off soon.
 const FULL_SCAN_MS = 600_000;
 const BAD_KEY = 'gs:espn-bad';
+const KNOWN = new Set(NAMED.map((l) => l[0]));
 const byLeague = new Map();
 let lastFull = 0;
 let bad = {};
 try { bad = JSON.parse(localStorage.getItem(BAD_KEY) || '{}'); } catch { /* no storage */ }
-for (const [k, t] of Object.entries(bad)) if (Date.now() - t > 86_400_000) delete bad[k];
+for (const [k, t] of Object.entries(bad)) if (Date.now() - t > 86_400_000 || KNOWN.has(k)) delete bad[k];
 
 export const scanStats = { leagues: 0, active: 0, skipped: 0, lastFull: 0 };
 
@@ -341,7 +343,9 @@ export async function fetchMatches({ proxy, force = false } = {}) {
     if (r.status === 'fulfilled') { byLeague.set(lg, r.value); ok++; }
     else {
       lastErr = r.reason;
-      if (r.reason?.status === 400 || r.reason?.status === 404) { bad[lg] = now; byLeague.delete(lg); } // unknown competition only
+      // Unknown competition only. Well-known ones are never skipped: ESPN sometimes answers 400/404
+      // for a competition between rounds, which used to hide e.g. the Nations League for 24 hours.
+      if ((r.reason?.status === 400 || r.reason?.status === 404) && !KNOWN.has(lg)) { bad[lg] = now; byLeague.delete(lg); }
     }
   });
   try { localStorage.setItem(BAD_KEY, JSON.stringify(bad)); } catch { /* ignore */ }
@@ -381,7 +385,7 @@ export async function fetchUpcoming({ proxy, days = 7 } = {}) {
       return out;
     }
   };
-  const leagues = FAMOUS.filter((s) => !bad[s]);
+  const leagues = FAMOUS.filter((s) => !bad[s] || KNOWN.has(s));
   const results = await Promise.allSettled(leagues.map((lg) => cached(`up:${lg}:${ymd(from)}`, 30 * 60_000, () => one(lg))));
   const seen = new Set();
   return results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
@@ -429,6 +433,48 @@ async function domesticRecord(teamId, league, proxy) {
   return null;
 }
 
+// ---- National teams ----
+// National teams have no domestic league, and their competitions are short (a Nations League group is
+// 6 games, a World Cup group 3), so the competition's own table rarely reaches 5 games. Their season
+// record is built instead from every international match they played in the last 12 months
+// (Nations League, qualifiers, tournaments, friendlies), read from their schedule in each competition.
+const INTL_BY_CONF = {
+  uefa: ['uefa.nations', 'fifa.worldq.uefa', 'uefa.euroq', 'uefa.euro'],
+  conmebol: ['fifa.worldq.conmebol', 'conmebol.america'],
+  concacaf: ['concacaf.nations.league', 'fifa.worldq.concacaf', 'concacaf.gold'],
+  afc: ['fifa.worldq.afc', 'afc.asian.cup'],
+  caf: ['fifa.worldq.caf', 'caf.nations_qual', 'caf.nations'],
+  ofc: ['fifa.worldq.ofc'],
+};
+const INTL_COMMON = ['fifa.friendly', 'fifa.world'];
+const INTL_SLUGS = new Set([...Object.values(INTL_BY_CONF).flat(), ...INTL_COMMON]);
+export const isInternational = (league) => INTL_SLUGS.has(league);
+const confOf = (league) => (league.startsWith('fifa.worldq.') ? league.split('.')[2] : league.split('.')[0]);
+// Competitions to read a national team's matches from, most relevant first.
+export function internationalCandidates(league) {
+  const conf = INTL_BY_CONF[confOf(league)];
+  const rest = Object.entries(INTL_BY_CONF).filter(([k]) => INTL_BY_CONF[k] !== conf).flatMap(([, v]) => v);
+  return [...new Set([league, ...(conf || []), ...INTL_COMMON, ...(conf ? [] : rest)])].filter((s) => !bad[s] || KNOWN.has(s));
+}
+// Season-style record (games, goals for/against, points) from a list of completed games.
+export function recordFromGames(games) {
+  const r = { gp: games.length, gf: 0, ga: 0, pts: 0, rank: null };
+  for (const g of games) { r.gf += g.gf; r.ga += g.ga; r.pts += g.res === 'W' ? 3 : g.res === 'D' ? 1 : 0; }
+  return r;
+}
+const INTL_WINDOW_MS = 365 * 86_400_000;
+async function internationalGames(teamId, match, proxy) {
+  const before = new Date(match.date || Date.now()).getTime();
+  const byId = new Map();
+  for (const lg of internationalCandidates(match.league)) {
+    let json;
+    try { json = await teamSchedule(lg, teamId, proxy); } catch { continue; }
+    for (const g of scheduleGames(json, teamId, before)) if (before - new Date(g.date).getTime() <= INTL_WINDOW_MS) byId.set(g.id || `${g.date}|${g.opp}`, g);
+    if (byId.size >= 10) break; // enough for a stable record
+  }
+  return [...byId.values()].sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
 export async function fetchDetail(match, { proxy } = {}) {
   const standings = await leagueStandings(match.league, proxy);
   const summary = await getJSON(
@@ -437,6 +483,17 @@ export async function fetchDetail(match, { proxy } = {}) {
   );
   const detail = parseSummary(summary, match, standings);
   const formLeague = { home: match.league, away: match.league };
+  if (isInternational(match.league)) {
+    if (!(detail.table.home?.gp >= 5 && detail.table.away?.gp >= 5)) {
+      const games = await Promise.all(['home', 'away'].map((side) => internationalGames(match[side].id, match, proxy).catch(() => [])));
+      // Only when both have a record, so the two sides are measured the same way.
+      if (games[0].length >= 5 && games[1].length >= 5) {
+        ['home', 'away'].forEach((side, i) => { detail.table[side] = { ...recordFromGames(games[i]), league: 'international' }; });
+      }
+      ['home', 'away'].forEach((side, i) => { if (games[i].length > detail.form[side].length) detail.form[side] = games[i].slice(0, 5); });
+    }
+    return detail;
+  }
   // No usable season record in this competition for either team (cup tie, continental league phase,
   // early rounds): use both teams' domestic league tables instead, so the two records are comparable.
   if (!(detail.table.home?.gp >= 5 && detail.table.away?.gp >= 5)) {
@@ -464,6 +521,10 @@ export async function fetchDetail(match, { proxy } = {}) {
 
 // A team's last 5 completed matches before `before`, from ESPN's team schedule (newest first).
 export function parseSchedule(json, teamId, before) {
+  return scheduleGames(json, teamId, before).slice(0, 5).map(({ id, ...g }) => g);
+}
+// Every completed match before `before` in an ESPN team schedule (newest first).
+export function scheduleGames(json, teamId, before) {
   const cutoff = before ? new Date(before).getTime() : Date.now();
   const games = [];
   for (const e of json?.events || []) {
@@ -478,16 +539,18 @@ export function parseSchedule(json, teamId, before) {
     if (!me || !opp || gf == null || ga == null) continue;
     const homeIsMe = me.homeAway === 'home';
     games.push({
-      gf, ga, res: gf > ga ? 'W' : gf < ga ? 'L' : 'D', home: homeIsMe, date: e.date,
+      id: String(e.id ?? ''), gf, ga, res: gf > ga ? 'W' : gf < ga ? 'L' : 'D', home: homeIsMe, date: e.date,
       opp: opp.team?.shortDisplayName || opp.team?.displayName || '',
       hs: homeIsMe ? gf : ga, as: homeIsMe ? ga : gf,
       homeId: String(homeIsMe ? teamId : opp.id ?? opp.team?.id), awayId: String(homeIsMe ? opp.id ?? opp.team?.id : teamId),
     });
   }
-  return games.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  return games.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+function teamSchedule(league, teamId, proxy) {
+  return cached(`sched:${league}:${teamId}`, 6 * 3_600_000, () =>
+    getJSON(`${BASE}/site/v2/sports/soccer/${league}/teams/${teamId}/schedule`, proxy, { retries: 1 }));
 }
 function teamForm(league, teamId, before, proxy) {
-  return cached(`sched:${league}:${teamId}`, 6 * 3_600_000, () =>
-    getJSON(`${BASE}/site/v2/sports/soccer/${league}/teams/${teamId}/schedule`, proxy)
-  ).then((j) => parseSchedule(j, teamId, before));
+  return teamSchedule(league, teamId, proxy).then((j) => parseSchedule(j, teamId, before));
 }

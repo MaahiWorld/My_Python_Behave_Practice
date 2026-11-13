@@ -215,7 +215,8 @@ export function confidence(match, detail, h2h) {
   const sameLevel = division(t.home) === division(t.away);
   const seasonOk = enough && sameLevel;
   core.push(seasonOk);
-  if (seasonOk) have.push(t.home.league ? `domestic league records for both teams (${t.home.league === t.away.league ? t.home.league : `${t.home.league} / ${t.away.league}`})` : 'attacking and defensive records for both teams');
+  if (seasonOk && t.home.league === 'international') have.push(`international match records for both teams over the last 12 months (${t.home.gp} / ${t.away.gp} games)`);
+  else if (seasonOk) have.push(t.home.league ? `domestic league records for both teams (${t.home.league === t.away.league ? t.home.league : `${t.home.league} / ${t.away.league}`})` : 'attacking and defensive records for both teams');
   else missing.push(enough ? 'comparable season records (teams from different divisions)' : 'season attacking/defensive records for both teams (cup game or early season)');
   const formOk = (detail.form?.home?.length || 0) >= 4 && (detail.form?.away?.length || 0) >= 4;
   core.push(formOk);

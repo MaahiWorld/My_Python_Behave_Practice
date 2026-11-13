@@ -116,7 +116,11 @@ Each match card shows how these moved the prediction, e.g. `Attack/defence ▲ +
 their lower divisions, plus the Americas, Asia, Africa, Oceania and international tournaments (see
 `LEAGUES` in `js/api.js`). Every competition is scanned every 3 minutes; competitions with a live
 match are refreshed every 30 seconds. Any competition ESPN doesn't recognise is skipped
-automatically.
+automatically (the headline competitions are never skipped).
+
+National-team games (Nations League, qualifiers, World Cup, friendlies) have no domestic league to fall
+back on and their group tables are too short, so each team's season record is built from all its
+internationals in the last 12 months, read from its schedule in each international competition.
 
 **API-Football (free key)** adds matches from its 1,000+ competitions that ESPN doesn't carry. The free
 100 requests a day are managed automatically: the match list costs 1 request and refreshes at most

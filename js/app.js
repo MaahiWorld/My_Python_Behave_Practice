@@ -6,6 +6,8 @@ import { predict, phaseOf } from './model.js';
 import { mergeMatches } from './merge.js';
 import { MARKETS, RULES, marketPicks, evaluateMarkets, recordPicks, settlePicks, trackRecord, bestSide, sideLabel, marketById, settleFootball } from './markets.js';
 import { loadRecords, updateRecords, summarize, toCSV, saveRecords } from './records.js';
+import { makeTools } from './analyst-tools.js';
+import { runAnalyst, makeClient, costOf } from './analyst.js';
 import { fetchTennis, fetchTennisDay, predictTennis, tennisMarkets, recordTennisPicks, settleTennisPicks, settleTennisMarket, scoreState, TENNIS_MARKETS, TENNIS_RULES, TENNIS_PARAMS, barOf, demoTennis } from './tennis.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -27,7 +29,7 @@ const settings = {
 const keyFor = (id) => store.get('key:' + id, '');
 const scanOn = (id) => store.get('scan:' + id, true);
 // ESPN is always scanned; keyed sources join the scan once a key is saved (and not switched off).
-const enabledSources = () => SOURCES.filter((s) => s.kind !== 'odds' && (!s.needsKey || (keyFor(s.id) && scanOn(s.id))));
+const enabledSources = () => SOURCES.filter((s) => !s.kind && (!s.needsKey || (keyFor(s.id) && scanOn(s.id))));
 
 // ---- Bookmaker odds (js/odds.js; only with a key for The Odds API) ----
 const oddsKey = () => (keyFor('theodds') && scanOn('theodds') ? keyFor('theodds') : '');
@@ -202,6 +204,7 @@ function route() {
   if (h === 'markets') return { name: 'markets' };
   if (h === 'tennis') return { name: 'tennis' };
   if (h === 'results') return { name: 'results' };
+  if (h === 'analyst') return { name: 'analyst' };
   const m = h.match(/^m\/([^/]+)\/(.+)$/);
   return m ? { name: 'match', league: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : { name: 'list' };
 }
@@ -213,6 +216,7 @@ function render() {
   else if (r.name === 'markets') { renderMarkets(); warm(); loadUpcoming(); }
   else if (r.name === 'tennis') { loadTennis(); renderTennis(); }
   else if (r.name === 'results') { renderResults(); checkResults(); }
+  else if (r.name === 'analyst') renderAnalyst();
   else renderList();
 }
 
@@ -400,7 +404,7 @@ view.addEventListener('click', (e) => {
 
 function nav(current) {
   const link = (href, id, label) => `<a href="${href}" ${current === id ? 'aria-current="page"' : ''}>${label}</a>`;
-  return `<nav class="nav">${link('#/', 'list', 'Matches')}${link('#/markets', 'markets', 'Markets')}${link('#/tennis', 'tennis', 'Tennis')}${link('#/results', 'results', 'Results')}</nav>`;
+  return `<nav class="nav">${link('#/', 'list', 'Matches')}${link('#/markets', 'markets', 'Markets')}${link('#/tennis', 'tennis', 'Tennis')}${link('#/results', 'results', 'Results')}${link('#/analyst', 'analyst', 'Analyst')}</nav>`;
 }
 
 // ---- Upcoming fixtures (next 7 days, best-known competitions) ----
@@ -1064,6 +1068,120 @@ function matchHTML(m, d, err) {
     <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
 }
 
+// ---- Analyst page (Claude agent: js/analyst.js, rules in skills/match-analyst/SKILL.md) ----
+const analyst = { query: '', running: false, steps: [], result: null, error: null, abort: null };
+let skillText = null;
+async function loadSkill() {
+  if (skillText) return skillText;
+  const res = await fetch('skills/match-analyst/SKILL.md', { cache: 'no-cache' });
+  if (!res.ok) throw new Error('Could not load the analyst skill file.');
+  return (skillText = await res.text());
+}
+const STEP_TXT = {
+  find_matches: (i) => `Searching fixtures for “${i.query}”`,
+  get_match_data: (i) => `Reading form, table and head-to-head (${i.match_id})`,
+  get_model_prediction: (i) => `Running the goal model (${i.match_id})`,
+};
+function stepLine(s) {
+  if (s.kind === 'thinking') return s.turn ? null : 'Claude is reading the request…';
+  if (s.kind === 'tool') return (STEP_TXT[s.name] || ((x) => s.name))(s.input || {});
+  if (s.kind === 'tool_error') return `⚠ ${s.name}: ${s.message}`;
+  if (s.kind === 'fixing') return `Answer broke ${s.violations.length} rule${s.violations.length > 1 ? 's' : ''}; asking Claude to fix it`;
+  return null;
+}
+
+async function startAnalysis(query) {
+  const key = keyFor('anthropic');
+  if (!key || analyst.running || !query.trim()) return;
+  analyst.query = query.trim();
+  analyst.running = true; analyst.steps = []; analyst.result = null; analyst.error = null;
+  analyst.abort = new AbortController();
+  renderAnalyst();
+  try {
+    const [skill, client] = await Promise.all([loadSkill(), makeClient(key)]);
+    const tools = makeTools({
+      pool: () => [...state.matches, ...state.upcoming],
+      ensureFixtures: () => loadUpcoming(),
+      detail: (m) => getDetail(m, { ttl: m.state === 'in' ? 60_000 : SAVED_MS }),
+    });
+    analyst.result = await runAnalyst({
+      client, skill, query: analyst.query, tools, signal: analyst.abort.signal,
+      onStep: (s) => { const t = stepLine(s); if (t) { analyst.steps.push(t); if (route().name === 'analyst') renderAnalyst(); } },
+    });
+  } catch (e) {
+    const status = e?.status;
+    analyst.error = status === 401 ? 'Your Claude API key was rejected. Check it on the Data sources page.'
+      : status === 429 ? 'Claude is rate-limiting this key. Wait a minute and try again.'
+      : e?.message === 'Failed to fetch' ? 'Could not reach Claude (or the data feed) from this browser.'
+      : e?.message || String(e);
+  } finally {
+    analyst.running = false; analyst.abort = null;
+    if (route().name === 'analyst') renderAnalyst();
+  }
+}
+
+const pctBar = (label, p, cls = '') => `<div class="an-bar ${cls}"><span>${esc(label)}</span><div class="track"><i style="width:${Math.round(p * 100)}%"></i></div><b>${pct(p)}</b></div>`;
+const EFFECT = { favours_home: 'Favours home', favours_away: 'Favours away', more_goals: 'More goals', fewer_goals: 'Fewer goals', neutral: 'Neutral' };
+function predictionCard(p) {
+  const [lg, ...rest] = p.match_id.split('/');
+  const r = p.result, g = p.goals;
+  const [home, away] = p.fixture.split(/\s+vs\s+/);
+  const pickTxt = { home: `${home} win`, draw: 'Draw', away: `${away || 'Away'} win` }[r.pick];
+  const halfRow = (name, h) => (h ? `<tr><th>${name}</th><td>${h.expected_goals.toFixed(1)}</td><td>${h.most_likely_goals}</td><td>${pct(h.over_0_5)}</td><td>${pct(h.over_1_5)}</td></tr>` : `<tr><th>${name}</th><td colspan="4" class="muted">not available</td></tr>`);
+  return `<section class="card section an-card">
+    <div class="an-head">
+      <div><a href="#/m/${encodeURIComponent(lg)}/${encodeURIComponent(rest.join('/'))}"><b>${esc(p.fixture)}</b></a>
+        <div class="muted small">${esc(p.competition)} · ${p.live ? '<span class="bad">live</span>' : esc(new Date(p.kickoff).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}</div></div>
+      <span class="badge ${p.confidence === 'high' ? 'on' : 'ready'}">${esc(p.confidence)} confidence</span>
+    </div>
+    <p>${esc(p.summary)}</p>
+    <h3>Result · most likely: ${esc(pickTxt)}</h3>
+    ${pctBar(home || 'Home', r.home_win, 'home')}${pctBar('Draw', r.draw)}${pctBar(away || 'Away', r.away_win, 'away')}
+    <h3>Goals</h3>
+    <div class="an-goals">
+      <div><b>${g.expected_total.toFixed(1)}</b><span>expected</span></div>
+      <div><b>${g.most_likely_total}</b><span>most likely total</span></div>
+      <div><b>${pct(g.over_1_5)}</b><span>Over 1.5</span></div>
+      <div><b>${pct(g.over_2_5)}</b><span>Over 2.5</span></div>
+      <div><b>${pct(g.btts)}</b><span>both score</span></div>
+    </div>
+    <table class="an-halves"><thead><tr><th></th><th>Expected</th><th>Most likely</th><th>Over 0.5</th><th>Over 1.5</th></tr></thead>
+      <tbody>${halfRow('1st half', p.first_half)}${halfRow('2nd half', p.second_half)}</tbody></table>
+    <h3>What drives it</h3>
+    <ul class="an-factors">${p.factors.map((f) => `<li><b>${esc(f.factor)}</b> <span class="tag">${esc(EFFECT[f.effect] || f.effect)}</span><div class="muted small">${esc(f.evidence)}</div></li>`).join('')}</ul>
+    ${p.adjustments.length ? `<h3>Adjustments to the model</h3><ul class="an-factors">${p.adjustments.map((a) => `<li><b>${esc(a.market)}</b>: ${a.model_value} → ${a.new_value}<div class="muted small">${esc(a.reason)}</div></li>`).join('')}</ul>` : '<p class="muted small">No adjustments: these are the model\'s numbers.</p>'}
+    ${p.caveats.length ? `<p class="muted small">⚠ ${p.caveats.map(esc).join(' · ')}</p>` : ''}
+  </section>`;
+}
+
+function renderAnalyst() {
+  const key = keyFor('anthropic');
+  const res = analyst.result, a = res?.answer;
+  const examples = ['Premier League', 'LaLiga', 'Champions League', 'Arsenal vs Chelsea'];
+  view.innerHTML = `${nav('analyst')}
+    <h2 class="page-title">Match analyst</h2>
+    <p class="muted small">Type a league or a fixture. Claude reads both teams' recent form, last 5 results, attack and defence,
+      table position and head-to-head from the live data, then predicts the result, total goals and goals in each half.</p>
+    ${key ? '' : '<div class="banner">Add a Claude API key on the <a href="#/sources">Data sources</a> page to use the analyst.</div>'}
+    <form id="an-form" class="an-form">
+      <input id="an-q" type="text" placeholder="e.g. Arsenal vs Chelsea, or Serie A" value="${esc(analyst.query)}" autocomplete="off" ${analyst.running ? 'disabled' : ''}>
+      ${analyst.running ? '<button type="button" class="btn" id="an-stop">Stop</button>' : `<button class="btn primary" ${key ? '' : 'disabled'}>Analyse</button>`}
+    </form>
+    <div class="chips">${examples.map((x) => `<button class="chip" type="button" data-anq="${esc(x)}" ${!key || analyst.running ? 'disabled' : ''}>${esc(x)}</button>`).join('')}</div>
+    ${analyst.steps.length ? `<ol class="an-steps small muted">${analyst.steps.map((t) => `<li>${esc(t)}</li>`).join('')}${analyst.running ? '<li class="an-busy">working…</li>' : ''}</ol>` : ''}
+    ${analyst.error ? `<div class="banner">${esc(analyst.error)}</div>` : ''}
+    ${a ? `<p>${esc(a.message)}</p>
+      ${a.clarification_question ? `<p><b>${esc(a.clarification_question)}</b></p>` : ''}
+      ${a.candidates.length ? `<div class="chips">${a.candidates.map((c) => `<button class="chip" type="button" data-anq="${esc(c.label)}">${esc(c.label)}</button>`).join('')}</div>` : ''}
+      ${res.violations.length ? `<div class="banner small">This answer still breaks ${res.violations.length} of the analyst's rules, so treat it with care:<ul>${res.violations.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+      ${a.predictions.map(predictionCard).join('')}
+      <p class="muted small">${res.usage.requests} requests to Claude · about $${costOf(res.usage).toFixed(2)} at list prices.</p>` : ''}
+    <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
+  $('#an-form')?.addEventListener('submit', (e) => { e.preventDefault(); startAnalysis($('#an-q').value); });
+  $('#an-stop')?.addEventListener('click', () => analyst.abort?.abort());
+  view.querySelectorAll('[data-anq]').forEach((b) => b.addEventListener('click', () => startAnalysis(b.dataset.anq)));
+}
+
 // ---- Data sources page ----
 function renderSources() {
   view.innerHTML = `<a class="back" href="#/">‹ All matches</a>
@@ -1077,7 +1195,7 @@ function renderSources() {
       const key = keyFor(s.id);
       const on = !s.needsKey || (key && scanOn(s.id));
       const status = !s.needsKey ? '<span class="badge on">Always on</span>'
-        : on ? `<span class="badge on">${s.kind === 'odds' ? 'On' : 'Scanning'}</span>` : key ? '<span class="badge ready">Off</span>' : '<span class="badge off">Needs key</span>';
+        : on ? `<span class="badge on">${s.kind ? 'On' : 'Scanning'}</span>` : key ? '<span class="badge ready">Off</span>' : '<span class="badge off">Needs key</span>';
       const quota = s.id === 'apifootball' && key ? `<p class="small quota">Free requests left today: <b>${afQuota.remaining}/${afQuota.limit}</b> (resets 00:00 UTC)</p>` : '';
       const oddsInfo = s.id === 'theodds' && key && oddsQuota.remaining != null ? `<p class="small quota">Credits left this month: <b>${oddsQuota.remaining}</b>${oddsQuota.used != null ? ` (${oddsQuota.used} used)` : ''}</p>` : '';
       const espnInfo = s.id === 'espn' ? `<p class="small quota">${espnScan.leagues} competitions in the scan list${espnScan.active ? ` · ${espnScan.active} with matches today` : ''}</p>` : '';
@@ -1096,7 +1214,7 @@ function renderSources() {
             <button class="btn" data-act="test" type="button">Test</button>
             ${key ? '<button class="btn" data-act="remove" type="button">Remove</button>' : ''}
           </div>` : ''}
-        ${s.needsKey && key ? `<label class="scan-toggle"><input type="checkbox" data-act="scan" ${scanOn(s.id) ? 'checked' : ''}> ${s.kind === 'odds' ? 'Show bookmaker odds' : 'Include in the match scan'}</label>` : ''}
+        ${s.needsKey && key && s.kind !== 'ai' ? `<label class="scan-toggle"><input type="checkbox" data-act="scan" ${scanOn(s.id) ? 'checked' : ''}> ${s.kind === 'odds' ? 'Show bookmaker odds' : 'Include in the match scan'}</label>` : ''}
         <p class="test-result small" aria-live="polite"></p>
       </section>`;
     }).join('')}
@@ -1112,7 +1230,7 @@ view.addEventListener('click', async (e) => {
   const out = card.querySelector('.test-result');
   const act = b.dataset.act;
   if (act === 'show') { input.type = input.type === 'password' ? 'text' : 'password'; b.textContent = input.type === 'password' ? 'Show' : 'Hide'; return; }
-  if (act === 'save') { store.set('key:' + id, input.value.trim()); onSourceChange(); renderSources(); flash(id, input.value.trim() ? 'Key saved and added to the scan.' : 'Key cleared.'); return; }
+  if (act === 'save') { store.set('key:' + id, input.value.trim()); onSourceChange(); renderSources(); flash(id, input.value.trim() ? (sourceById(id).kind ? 'Key saved.' : 'Key saved and added to the scan.') : 'Key cleared.'); return; }
   if (act === 'remove') {
     store.set('key:' + id, '');
     onSourceChange(); renderSources(); flash(id, 'Key removed. This source has left the scan.'); return;
@@ -1128,7 +1246,7 @@ view.addEventListener('click', async (e) => {
     try {
       const msg = await sourceById(id).adapter.test({ key, proxy: settings.proxy });
       store.set('key:' + id, key);
-      onSourceChange(); renderSources(); flash(id, `✓ ${msg}. Key saved${sourceById(id).kind === 'odds' ? '' : ' and added to the scan'}.`);
+      onSourceChange(); renderSources(); flash(id, `✓ ${msg}. Key saved${sourceById(id).kind ? '' : ' and added to the scan'}.`);
     } catch (err) {
       out.textContent = `✗ ${err.message === 'Failed to fetch' ? 'Could not reach the service from this browser. Try setting the CORS proxy in ⚙ Settings.' : err.message}`;
       out.className = 'test-result small bad';
@@ -1154,6 +1272,7 @@ async function refresh(full = true, force = false) {
   else if (r.name === 'tennis') { loadTennis(); renderTennis(); }
   else if (r.name === 'results') { renderResults(); checkResults(); }
   else if (r.name === 'match') renderMatch(r, !full);
+  else if (r.name === 'analyst' && !analyst.running) renderAnalyst();
 }
 function schedule() {
   clearInterval(timer);

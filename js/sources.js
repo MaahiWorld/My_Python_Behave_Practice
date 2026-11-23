@@ -1,7 +1,7 @@
 // Data source registry. ESPN is free and needs no key; the others activate as soon as
 // a key is saved on the Data sources page and the source is selected.
 // Every adapter returns the same normalized shapes as js/api.js (ESPN).
-import { testKey } from './analyst.js';
+import { PROVIDERS, listModels } from './llm.js';
 import { fetchMatches as espnMatches, fetchDetail as espnDetail, num, proxied, cached } from './api.js';
 import { oddsSource } from './odds.js';
 
@@ -388,12 +388,15 @@ export const SOURCES = [
     lacks: ['BTTS and first-half markets', 'Tennis sets / games'],
     note: 'Odds sit next to the model\'s chances; they don\'t change which picks are made. Saves credits: only competitions with a match in the next 2 days are requested, each at most every 2 hours (2 credits per football competition, 1 per tennis tournament).',
   },
-  {
-    id: 'anthropic', kind: 'ai', priority: 0, name: 'Claude (AI match analyst)', cost: 'Pay as you go · roughly $0.05–0.40 per analysis', needsKey: true,
-    signup: 'https://platform.claude.com/settings/keys', adapter: { test: testKey },
-    provides: ['Analyst page: type a league or "Team 1 vs Team 2"', 'Reads form, last 5, attack/defence, table, head-to-head', 'Predicts result, total goals and goals per half, with reasons'],
+  ...PROVIDERS.map((p) => ({
+    id: p.id, kind: 'ai', priority: 0, name: `${p.name} · AI analyst`, cost: p.cost, needsKey: true, signup: p.signup,
+    adapter: { test: async ({ key, proxy }) => { const list = await listModels(p, key); saveModelList(p.id, list); return `Key works · ${list.length} model${list.length === 1 ? '' : 's'} available`; } },
+    provides: ['Analyst page: type a league or "Team 1 vs Team 2"', 'Reads form, last 5, attack/defence, table, head-to-head', 'Result, total goals and goals per half, with reasons'],
     lacks: ['Team news and injuries (not in the data)'],
-    note: 'Claude Opus 5.5 works from the same ESPN data and backtested model as the rest of the app, under the rules in skills/match-analyst/SKILL.md. Requests go from this browser straight to Anthropic with your key, and are billed to your Anthropic account.',
-  },
+    note: `${p.note} Free of charge: requests go from this browser straight to the provider with your free key.`,
+  })),
 ];
+// Models a free key can use, saved after a successful Test (for the model picker).
+export function saveModelList(id, list) { try { localStorage.setItem(`gs:models:${id}`, JSON.stringify(list.slice(0, 300))); } catch { /* ignore */ } }
+export function modelList(id) { try { return JSON.parse(localStorage.getItem(`gs:models:${id}`) || '[]'); } catch { return []; } }
 export const sourceById = (id) => SOURCES.find((s) => s.id === id) || SOURCES[0];

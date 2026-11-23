@@ -7,7 +7,9 @@ import { mergeMatches } from './merge.js';
 import { MARKETS, RULES, marketPicks, evaluateMarkets, recordPicks, settlePicks, trackRecord, bestSide, sideLabel, marketById, settleFootball } from './markets.js';
 import { loadRecords, updateRecords, summarize, toCSV, saveRecords } from './records.js';
 import { makeTools } from './analyst-tools.js';
-import { runAnalyst, makeClient, costOf } from './analyst.js';
+import { runAnalyst, builtinAnalyst } from './analyst.js';
+import { PROVIDERS, providerById, chat } from './llm.js';
+import { modelList } from './sources.js';
 import { fetchTennis, fetchTennisDay, predictTennis, tennisMarkets, recordTennisPicks, settleTennisPicks, settleTennisMarket, scoreState, TENNIS_MARKETS, TENNIS_RULES, TENNIS_PARAMS, barOf, demoTennis } from './tennis.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -1068,7 +1070,7 @@ function matchHTML(m, d, err) {
     <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
 }
 
-// ---- Analyst page (Claude agent: js/analyst.js, rules in skills/match-analyst/SKILL.md) ----
+// ---- Analyst page (free-tier LLM agent or built-in analyst: js/analyst.js; rules in skills/match-analyst/SKILL.md) ----
 const analyst = { query: '', running: false, steps: [], result: null, error: null, abort: null };
 let skillText = null;
 async function loadSkill() {
@@ -1083,37 +1085,52 @@ const STEP_TXT = {
   get_model_prediction: (i) => `Running the goal model (${i.match_id})`,
 };
 function stepLine(s) {
-  if (s.kind === 'thinking') return s.turn ? null : 'Claude is reading the request…';
+  if (s.kind === 'thinking') return s.turn ? null : 'The AI is reading the request…';
   if (s.kind === 'tool') return (STEP_TXT[s.name] || ((x) => s.name))(s.input || {});
   if (s.kind === 'tool_error') return `⚠ ${s.name}: ${s.message}`;
-  if (s.kind === 'fixing') return `Answer broke ${s.violations.length} rule${s.violations.length > 1 ? 's' : ''}; asking Claude to fix it`;
+  if (s.kind === 'fixing') return `Answer broke ${s.violations.length} rule${s.violations.length > 1 ? 's' : ''}; asking the AI to fix it`;
   return null;
 }
 
+// Which analyst runs: 'builtin' (no AI) or a free provider with a saved key.
+const modelFor = (id) => store.get('model:' + id, '') || providerById(id)?.model;
+const readyProviders = () => PROVIDERS.filter((p) => keyFor(p.id));
+function analystChoice() {
+  const want = store.get('analyst', '');
+  if (want === 'builtin') return 'builtin';
+  if (want && keyFor(want)) return want;
+  return readyProviders()[0]?.id || 'builtin';
+}
+
 async function startAnalysis(query) {
-  const key = keyFor('anthropic');
-  if (!key || analyst.running || !query.trim()) return;
+  if (analyst.running || !query.trim()) return;
   analyst.query = query.trim();
   analyst.running = true; analyst.steps = []; analyst.result = null; analyst.error = null;
   analyst.abort = new AbortController();
   renderAnalyst();
+  const tools = makeTools({
+    pool: () => [...state.matches, ...state.upcoming],
+    ensureFixtures: () => loadUpcoming(),
+    detail: (m) => getDetail(m, { ttl: m.state === 'in' ? 60_000 : SAVED_MS }),
+  });
+  const onStep = (s) => { const t = stepLine(s); if (t) { analyst.steps.push(t); if (route().name === 'analyst') renderAnalyst(); } };
+  const builtin = async () => ({ ...(await builtinAnalyst({ query: analyst.query, tools, onStep })), by: 'Built-in analyst (no AI)' });
+  const choice = analystChoice();
   try {
-    const [skill, client] = await Promise.all([loadSkill(), makeClient(key)]);
-    const tools = makeTools({
-      pool: () => [...state.matches, ...state.upcoming],
-      ensureFixtures: () => loadUpcoming(),
-      detail: (m) => getDetail(m, { ttl: m.state === 'in' ? 60_000 : SAVED_MS }),
-    });
-    analyst.result = await runAnalyst({
-      client, skill, query: analyst.query, tools, signal: analyst.abort.signal,
-      onStep: (s) => { const t = stepLine(s); if (t) { analyst.steps.push(t); if (route().name === 'analyst') renderAnalyst(); } },
-    });
+    if (choice === 'builtin') analyst.result = await builtin();
+    else {
+      const p = providerById(choice), model = modelFor(choice);
+      const skill = await loadSkill();
+      const run = await runAnalyst({ chat: (body, opts) => chat(p, keyFor(choice), model, body, opts), skill, query: analyst.query, tools, onStep, signal: analyst.abort.signal });
+      analyst.result = { ...run, by: `${p.name} · ${model}` };
+    }
   } catch (e) {
-    const status = e?.status;
-    analyst.error = status === 401 ? 'Your Claude API key was rejected. Check it on the Data sources page.'
-      : status === 429 ? 'Claude is rate-limiting this key. Wait a minute and try again.'
-      : e?.message === 'Failed to fetch' ? 'Could not reach Claude (or the data feed) from this browser.'
-      : e?.message || String(e);
+    if (analyst.abort?.signal.aborted) analyst.error = 'Stopped.';
+    else {
+      // The AI step failed (free quota used up, network, a model that can't use tools): still answer, free, without AI.
+      analyst.error = `${e?.message || e} Showing the built-in analysis instead.`;
+      try { analyst.result = await builtin(); } catch (e2) { analyst.error = e2?.message || String(e2); }
+    }
   } finally {
     analyst.running = false; analyst.abort = null;
     if (route().name === 'analyst') renderAnalyst();
@@ -1155,19 +1172,22 @@ function predictionCard(p) {
 }
 
 function renderAnalyst() {
-  const key = keyFor('anthropic');
+  const choice = analystChoice();
   const res = analyst.result, a = res?.answer;
+  const opt = (id, label) => `<option value="${id}" ${choice === id ? 'selected' : ''}>${esc(label)}</option>`;
   const examples = ['Premier League', 'LaLiga', 'Champions League', 'Arsenal vs Chelsea'];
   view.innerHTML = `${nav('analyst')}
     <h2 class="page-title">Match analyst</h2>
-    <p class="muted small">Type a league or a fixture. Claude reads both teams' recent form, last 5 results, attack and defence,
+    <p class="muted small">Type a league or a fixture. The analyst reads both teams' recent form, last 5 results, attack and defence,
       table position and head-to-head from the live data, then predicts the result, total goals and goals in each half.</p>
-    ${key ? '' : '<div class="banner">Add a Claude API key on the <a href="#/sources">Data sources</a> page to use the analyst.</div>'}
+    <label class="an-pick small">Analyst
+      <select id="an-who" ${analyst.running ? 'disabled' : ''}>${opt('builtin', 'Built-in (no AI, always free)')}${readyProviders().map((p) => opt(p.id, `${p.name} · ${modelFor(p.id)}`)).join('')}</select></label>
+    ${readyProviders().length ? '' : '<p class="muted small">Free AI analysts (Google Gemini, Groq, OpenRouter free models, Cerebras) appear here once you add a free key on the <a href="#/sources">Data sources</a> page. The built-in analyst needs no key.</p>'}
     <form id="an-form" class="an-form">
       <input id="an-q" type="text" placeholder="e.g. Arsenal vs Chelsea, or Serie A" value="${esc(analyst.query)}" autocomplete="off" ${analyst.running ? 'disabled' : ''}>
-      ${analyst.running ? '<button type="button" class="btn" id="an-stop">Stop</button>' : `<button class="btn primary" ${key ? '' : 'disabled'}>Analyse</button>`}
+      ${analyst.running ? '<button type="button" class="btn" id="an-stop">Stop</button>' : '<button class="btn primary">Analyse</button>'}
     </form>
-    <div class="chips">${examples.map((x) => `<button class="chip" type="button" data-anq="${esc(x)}" ${!key || analyst.running ? 'disabled' : ''}>${esc(x)}</button>`).join('')}</div>
+    <div class="chips">${examples.map((x) => `<button class="chip" type="button" data-anq="${esc(x)}" ${analyst.running ? 'disabled' : ''}>${esc(x)}</button>`).join('')}</div>
     ${analyst.steps.length ? `<ol class="an-steps small muted">${analyst.steps.map((t) => `<li>${esc(t)}</li>`).join('')}${analyst.running ? '<li class="an-busy">working…</li>' : ''}</ol>` : ''}
     ${analyst.error ? `<div class="banner">${esc(analyst.error)}</div>` : ''}
     ${a ? `<p>${esc(a.message)}</p>
@@ -1175,10 +1195,11 @@ function renderAnalyst() {
       ${a.candidates.length ? `<div class="chips">${a.candidates.map((c) => `<button class="chip" type="button" data-anq="${esc(c.label)}">${esc(c.label)}</button>`).join('')}</div>` : ''}
       ${res.violations.length ? `<div class="banner small">This answer still breaks ${res.violations.length} of the analyst's rules, so treat it with care:<ul>${res.violations.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
       ${a.predictions.map(predictionCard).join('')}
-      <p class="muted small">${res.usage.requests} requests to Claude · about $${costOf(res.usage).toFixed(2)} at list prices.</p>` : ''}
+      <p class="muted small">By ${esc(res.by)}${res.usage ? ` · ${res.usage.requests} free-tier requests` : ''} · no cost.</p>` : ''}
     <p class="disclaimer">Statistical estimate only — not betting advice.</p>`;
   $('#an-form')?.addEventListener('submit', (e) => { e.preventDefault(); startAnalysis($('#an-q').value); });
   $('#an-stop')?.addEventListener('click', () => analyst.abort?.abort());
+  $('#an-who')?.addEventListener('change', (e) => { store.set('analyst', e.target.value); renderAnalyst(); });
   view.querySelectorAll('[data-anq]').forEach((b) => b.addEventListener('click', () => startAnalysis(b.dataset.anq)));
 }
 
@@ -1214,6 +1235,9 @@ function renderSources() {
             <button class="btn" data-act="test" type="button">Test</button>
             ${key ? '<button class="btn" data-act="remove" type="button">Remove</button>' : ''}
           </div>` : ''}
+        ${s.kind === 'ai' ? `<label class="stack small model-row">Model
+            <input type="text" class="model-input" list="models-${s.id}" value="${esc(store.get('model:' + s.id, '') || providerById(s.id).model)}" autocomplete="off" spellcheck="false">
+            <datalist id="models-${s.id}">${modelList(s.id).map((m) => `<option value="${esc(m)}">`).join('')}</datalist></label>` : ''}
         ${s.needsKey && key && s.kind !== 'ai' ? `<label class="scan-toggle"><input type="checkbox" data-act="scan" ${scanOn(s.id) ? 'checked' : ''}> ${s.kind === 'odds' ? 'Show bookmaker odds' : 'Include in the match scan'}</label>` : ''}
         <p class="test-result small" aria-live="polite"></p>
       </section>`;
@@ -1230,6 +1254,8 @@ view.addEventListener('click', async (e) => {
   const out = card.querySelector('.test-result');
   const act = b.dataset.act;
   if (act === 'show') { input.type = input.type === 'password' ? 'text' : 'password'; b.textContent = input.type === 'password' ? 'Show' : 'Hide'; return; }
+  const modelIn = card.querySelector('.model-input');
+  if (modelIn && (act === 'save' || act === 'test')) store.set('model:' + id, modelIn.value.trim());
   if (act === 'save') { store.set('key:' + id, input.value.trim()); onSourceChange(); renderSources(); flash(id, input.value.trim() ? (sourceById(id).kind ? 'Key saved.' : 'Key saved and added to the scan.') : 'Key cleared.'); return; }
   if (act === 'remove') {
     store.set('key:' + id, '');

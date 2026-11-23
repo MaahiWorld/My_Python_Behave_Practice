@@ -87,33 +87,39 @@ change which picks are made: the pick rules were backtested without odds, so the
 until enough priced picks have settled. To save credits, only competitions with a match in the next 2
 days are requested, at most every 2 hours each.
 
-## Match analyst (Claude, optional)
+## Match analyst (free)
 
-The **Analyst** page is an AI agent. Type a league (“Premier League”, “LaLiga”) or a fixture
-(“Arsenal vs Chelsea”, “Inter v Milan”). Claude (Opus 5.5) finds the match in the feed (live, today
-and the next 7 days in the main competitions; up to 5 fixtures for a league), reads both teams' recent
-form, last 5 results, attack and defence strength, table position and points, and the head-to-head
-record, then predicts:
+The **Analyst** page takes a league (“Premier League”, “LaLiga”) or a fixture (“Arsenal vs Chelsea”,
+“Inter v Milan”). It finds the match in the feed (live, today and the next 7 days in the main
+competitions; up to 5 fixtures for a league) and reads both teams' recent form, last 5 results,
+attack and defence strength, table position and points, and head-to-head record. It then predicts:
 
 - the **result**: home / draw / away chances and the most likely outcome;
 - **total goals**: expected and most likely total, Over 1.5, Over 2.5, both teams to score;
 - goals in **each half**: expected, most likely, Over 0.5 and Over 1.5 for the 1st and the 2nd half.
 
-Each prediction lists the factors behind it with the numbers they come from.
+Each prediction lists the factors behind it with the numbers they come from. **It costs nothing.**
+Choose who does the analysis on the page:
+
+- **Built-in (no AI, always free)**: works with no key and offline in demo mode. It gives the model's
+  numbers with factors and a summary written from the data.
+- **A free AI model**: add a free key on the Data sources page for **Google Gemini** (AI Studio),
+  **Groq**, **OpenRouter** (only `:free` models are allowed, so nothing can be charged) or
+  **Cerebras**. The AI runs as an agent: it calls the tools, reads the match-up and explains it.
+  The browser calls the provider directly with your key (`js/llm.js`, OpenAI-compatible endpoints).
+  Free tiers have rate limits: the app waits and retries when told to slow down. If the AI step fails
+  anyway (quota used up, network, a model that can't use tools), you get the built-in analysis
+  instead. Model names change often: **Test** on the Data sources page lists the models your key can
+  use, and you can type another one in the Model box.
 
 The agent's rules are in [`skills/match-analyst/SKILL.md`](skills/match-analyst/SKILL.md). Its tools
 (`js/analyst-tools.js`) use the same ESPN data and backtested model as the rest of the app, so the
-numbers start from the model. Claude may move a result or goals-market chance by at most 5 points, and
-the expected total by at most 0.3 goals, and only with a reason it lists. It may not adjust at all
-when data is missing, and it may not use facts the tools didn't return (no injuries or news from
+numbers start from the model. The AI may move a result or goals-market chance by at most 5 points,
+and the expected total by at most 0.3 goals, and only with a reason it lists. It may not adjust at
+all when data is missing, and it may not use facts the tools didn't return (no injuries or news from
 memory). The two halves must add up to the total. Code checks every answer against these rules
-(`checkAnswer`). An answer that breaks one is sent back to Claude once to fix; anything still wrong
-is shown with a warning.
-
-To turn it on, add a Claude API key on the Data sources page. The browser calls Anthropic directly
-with your key, so each analysis is billed to your Anthropic account: roughly $0.05–0.40, and the page
-shows the cost of each run. If Claude declines a request, it is retried on Anthropic's recommended
-fallback model.
+(`checkAnswer`). An answer that breaks one is sent back once to fix; anything still wrong is shown
+with a warning.
 
 ## Results page
 
@@ -210,7 +216,8 @@ js/sources.js         Paid/keyed data source adapters + registry
 js/markets.js         Football markets (O1.5/O2.5/BTTS/1X2/1st half), validation, settlement
 js/tennis.js          Tennis model, ESPN tennis parser, tennis markets
 js/odds.js            Bookmaker odds (The Odds API): parsing, matching, edge, credit budget
-js/analyst.js         Match analyst agent loop (Claude API, user's key)
+js/analyst.js         Match analyst: agent loop (any free provider) and built-in analyst
+js/llm.js             Free-tier LLM providers (Gemini, Groq, OpenRouter :free, Cerebras)
 js/analyst-tools.js   Analyst tools, answer schema and rule checks
 skills/match-analyst/ The analyst's skill: workflow and constraints
 backtest/tennis-*.js  Tennis backtest (TML-Database ATP results): fetch-tennis.sh, tennis-tune.js, tennis-run.js

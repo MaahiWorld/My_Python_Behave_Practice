@@ -1,4 +1,4 @@
-// Match Analyst agent: the tools Claude can call, the answer format it must return, and the checks
+// Match Analyst agent: the tools the AI can call, the answer format it must return, and the checks
 // its answer must pass. The rules themselves are written for the agent in skills/match-analyst/SKILL.md;
 // LIMITS below are the same numbers, enforced in code.
 // Everything here is plain data and functions, so it runs in tests without a browser or an API key.
@@ -196,11 +196,11 @@ export function modelPrediction(match, detail) {
     most_likely_scores: p.topScores.map((s) => ({ score: `${s.home}-${s.away}`, chance: r3(s.p) })),
     first_half: first, second_half: second,
     confidence: p.confidence.level, missing_data: p.confidence.missing,
-    main_drivers: p.reasons.filter((r) => r.key !== 'baseline').map((r) => ({ step: r.title, effect_on_total_goals: r2(r.delta), detail: r.detail })),
+    main_drivers: p.reasons.filter((r) => r.key !== 'baseline').map((r) => ({ step: r.title, effect_on_total_goals: r2(r.delta), why: r.short })),
   };
 }
 
-// ---- Tool definitions sent to Claude ----
+// ---- Tool definitions sent to the AI ----
 const idInput = {
   type: 'object', additionalProperties: false, required: ['match_id'],
   properties: { match_id: { type: 'string', description: 'A match_id returned by find_matches, e.g. "eng.1/740123".' } },
@@ -253,7 +253,7 @@ export function makeTools(ctx) {
   };
 }
 
-// ---- The answer Claude must return (structured output) ----
+// ---- The answer the AI must return (also used to check the format) ----
 const nullable = (s) => ({ anyOf: [s, { type: 'null' }] });
 const obj = (properties) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
 const half = obj({ expected_goals: { type: 'number' }, most_likely_goals: { type: 'integer' }, over_0_5: { type: 'number' }, over_1_5: { type: 'number' } });

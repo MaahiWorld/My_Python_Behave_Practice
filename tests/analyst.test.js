@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 const store = new Map();
 globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
 const T = await import('../js/analyst-tools.js');
-const { runAnalyst, MODEL } = await import('../js/analyst.js');
+const A = await import('../js/analyst.js');
+const { runAnalyst } = A;
+const L = await import('../js/llm.js');
 const { demoMatches, demoDetail } = await import('../js/demo.js');
 
 const pool = demoMatches();
@@ -162,66 +164,122 @@ test('tool and answer schemas are strict-mode compatible', () => {
   for (const d of T.TOOL_DEFS) { assert.equal(d.strict, true); walk(d.input_schema, d.name); }
 });
 
-// A scripted stand-in for the Anthropic client: returns the queued responses in order and records requests.
-function fakeClient(script) {
+// A scripted stand-in for a free-tier chat-completions provider: returns scripted replies and records requests.
+function fakeChat(script) {
   const requests = [];
-  return {
-    requests,
-    beta: { messages: { create: async (req) => { requests.push(structuredClone(req)); return script(requests.length, req); } } },
-  };
+  const fn = async (body) => { requests.push(structuredClone(body)); return script(requests.length, body); };
+  fn.requests = requests;
+  return fn;
 }
-const toolUse = (id, name, input) => ({ type: 'tool_use', id, name, input });
-const resp = (stop_reason, content) => ({ stop_reason, content, usage: { input_tokens: 100, output_tokens: 50 } });
+const call = (id, name, input) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(input) } });
+const toolsReply = (...calls) => ({ message: { role: 'assistant', content: null, tool_calls: calls }, finish: 'tool_calls', usage: { prompt_tokens: 100, completion_tokens: 20 } });
+const textReply = (text) => ({ message: { role: 'assistant', content: text }, finish: 'stop', usage: {} });
 
 test('agent loop: finds the match, calls the tools in parallel, returns a checked answer', async () => {
   const tools = T.makeTools(ctx);
   const steps = [];
-  const client = fakeClient((n) => {
-    if (n === 1) return resp('tool_use', [toolUse('t1', 'find_matches', { query: 'Northgate vs Harbour City' })]);
-    if (n === 2) return resp('tool_use', [toolUse('t2', 'get_match_data', { match_id: preId }), toolUse('t3', 'get_model_prediction', { match_id: preId })]);
-    return resp('end_turn', [{ type: 'text', text: JSON.stringify(answerFrom(tools.models.get(preId))) }]);
+  const chat = fakeChat((n) => {
+    if (n === 1) return toolsReply(call('t1', 'find_matches', { query: 'Northgate vs Harbour City' }));
+    if (n === 2) return toolsReply(call('t2', 'get_match_data', { match_id: preId }), call('t3', 'get_model_prediction', { match_id: preId }));
+    return textReply('Here it is:\n```json\n' + JSON.stringify(answerFrom(tools.models.get(preId))) + '\n```');
   });
-  const out = await runAnalyst({ client, skill: 'SKILL', query: 'Northgate vs Harbour City', tools, onStep: (s) => steps.push(s) });
+  const out = await runAnalyst({ chat, skill: 'SKILL', query: 'Northgate vs Harbour City', tools, onStep: (s) => steps.push(s) });
   assert.equal(out.answer.status, 'ok');
   assert.deepEqual(out.violations, []);
-  assert.equal(client.requests.length, 3);
-  const req = client.requests[0];
-  assert.equal(req.model, MODEL);
-  assert.deepEqual(req.thinking, { type: 'adaptive' });
-  assert.equal(req.fallbacks, 'default');
-  assert.equal(req.output_config.format.type, 'json_schema');
-  assert.equal(req.system[0].text, 'SKILL');
-  // Both results of the parallel turn come back in a single user message.
-  const third = client.requests[2].messages;
-  const results = third.at(-1).content;
-  assert.equal(results.length, 2);
-  assert.ok(results.every((r) => r.type === 'tool_result' && !r.is_error));
+  assert.equal(chat.requests.length, 3);
+  const req = chat.requests[0];
+  assert.equal(req.messages[0].role, 'system');
+  assert.match(req.messages[0].content, /^SKILL/);
+  assert.match(req.messages[0].content, /Answer format/);
+  assert.deepEqual(req.tools.map((t) => t.function.name), ['find_matches', 'get_match_data', 'get_model_prediction']);
+  assert.ok(!JSON.stringify(req.tools).includes('additionalProperties'), 'provider-neutral schemas');
+  // Each tool result is a role:"tool" message tied to its call.
+  const msgs = chat.requests[2].messages;
+  const results = msgs.filter((m) => m.role === 'tool');
+  assert.deepEqual(results.map((r) => r.tool_call_id), ['t1', 't2', 't3']);
+  assert.ok(!results.some((r) => r.content.startsWith('Error')));
   assert.equal(steps.filter((s) => s.kind === 'tool').length, 3);
 });
 
 test('agent loop: a rule-breaking answer is sent back once to be fixed', async () => {
   const tools = T.makeTools(ctx);
-  const client = fakeClient(async (n) => {
-    if (n === 1) return resp('tool_use', [toolUse('t1', 'get_model_prediction', { match_id: preId })]);
+  const chat = fakeChat(async (n) => {
+    if (n === 1) return toolsReply(call('t1', 'get_model_prediction', { match_id: preId }));
     const a = answerFrom(tools.models.get(preId));
     if (n === 2) a.predictions[0].goals.expected_total += 1; // breaks the 0.3 limit
-    return resp('end_turn', [{ type: 'text', text: JSON.stringify(a) }]);
+    return textReply(JSON.stringify(a));
   });
-  const out = await runAnalyst({ client, skill: 'S', query: 'x', tools });
+  const out = await runAnalyst({ chat, skill: 'S', query: 'x', tools });
   assert.deepEqual(out.violations, []);
-  assert.equal(client.requests.length, 3);
-  assert.match(client.requests[2].messages.at(-1).content, /breaks these rules/);
+  assert.equal(chat.requests.length, 3);
+  assert.match(chat.requests[2].messages.at(-1).content, /breaks these rules/);
 });
 
-test('agent loop: tool errors are returned to Claude, refusals stop the run', async () => {
+test('agent loop: tool errors go back to the model; replies without JSON are nudged once', async () => {
   const tools = T.makeTools(ctx);
-  const client = fakeClient((n) => (n === 1
-    ? resp('tool_use', [toolUse('t1', 'get_match_data', { match_id: 'nope/1' })])
-    : { stop_reason: 'refusal', content: [], stop_details: { explanation: 'test' }, usage: {} }));
-  await assert.rejects(runAnalyst({ client, skill: 'S', query: 'x', tools }), /declined/);
-  const r = client.requests[1].messages.at(-1).content[0];
-  assert.equal(r.is_error, true);
+  const chat = fakeChat((n) => (n === 1 ? toolsReply(call('t1', 'get_match_data', { match_id: 'nope/1' })) : textReply('I think the home side wins.')));
+  await assert.rejects(runAnalyst({ chat, skill: 'S', query: 'x', tools }), /required format/);
+  const r = chat.requests[1].messages.find((m) => m.role === 'tool');
   assert.match(r.content, /Unknown match_id/);
+  assert.equal(chat.requests.length, 3);
+});
+
+test('parseAnswer tolerates fences and text; normalizeAnswer fills missing lists', () => {
+  assert.deepEqual(A.parseAnswer('ok ```json\n{"status":"ok"}\n``` done'), { status: 'ok' });
+  assert.equal(A.parseAnswer('no json here'), null);
+  const n = A.normalizeAnswer({ predictions: [{ match_id: 'x' }] });
+  assert.equal(n.status, 'ok');
+  assert.deepEqual(n.predictions[0].factors, []);
+  assert.deepEqual(n.candidates, []);
+});
+
+test('built-in analyst (no AI): a fixture gets a full prediction that passes every rule', async () => {
+  const tools = T.makeTools(ctx);
+  const out = await A.builtinAnalyst({ query: 'Northgate vs Harbour City', tools });
+  assert.equal(out.answer.status, 'ok');
+  assert.deepEqual(out.violations, []);
+  const p = out.answer.predictions[0];
+  assert.equal(p.match_id, preId);
+  assert.ok(p.factors.length >= 3 && p.factors.every((f) => f.evidence));
+  assert.ok(p.first_half && p.second_half);
+  assert.match(p.summary, /goals/);
+});
+
+test('built-in analyst: league, finished match, unknown and partial queries', async () => {
+  const tools = T.makeTools(ctx);
+  const lg = await A.builtinAnalyst({ query: 'Demo League', tools });
+  assert.equal(lg.answer.status, 'ok');
+  assert.ok(lg.answer.predictions.length >= 1 && lg.answer.predictions.length <= T.LIMITS.maxMatches);
+  assert.deepEqual(lg.violations, []);
+  assert.equal((await A.builtinAnalyst({ query: 'Ashford vs Riverside', tools })).answer.status, 'no_matches', 'finished');
+  assert.equal((await A.builtinAnalyst({ query: 'Atlantis vs Lemuria', tools })).answer.status, 'no_matches');
+  const part = await A.builtinAnalyst({ query: 'Northgate vs Lemuria', tools });
+  assert.equal(part.answer.status, 'needs_clarification');
+  assert.ok(part.answer.candidates.length);
+});
+
+test('free providers: OpenAI-compatible request, retry on 429, OpenRouter limited to :free models', async () => {
+  const gemini = L.providerById('gemini');
+  let n = 0, sent;
+  const fetchFn = async (url, init) => {
+    n++; sent = { url, init };
+    if (n === 1) return new Response('{"error":{"message":"slow down"}}', { status: 429, headers: { 'retry-after': '0' } });
+    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1 } }), { status: 200 });
+  };
+  const out = await L.chat(gemini, 'k', 'gemini-x', { messages: [], tools: [] }, { fetchFn });
+  assert.equal(out.message.content, 'hi');
+  assert.equal(n, 2);
+  assert.equal(sent.url, `${gemini.base}/chat/completions`);
+  assert.equal(sent.init.headers.authorization, 'Bearer k');
+  assert.equal(JSON.parse(sent.init.body).model, 'gemini-x');
+  const or = L.providerById('openrouter');
+  await assert.rejects(L.chat(or, 'k', 'openai/gpt-5', { messages: [] }, { fetchFn }), /not a free model/);
+  assert.ok(or.model.endsWith(':free'));
+  const list = await L.listModels(or, 'k', { fetchFn: async () => new Response(JSON.stringify({ data: [
+    { id: 'a/b:free', supported_parameters: ['tools'] }, { id: 'a/c:free', supported_parameters: [] }, { id: 'a/paid', supported_parameters: ['tools'] }] })) });
+  assert.deepEqual(list, ['a/b:free']);
+  const bad = async () => new Response('{"error":{"message":"bad key"}}', { status: 401 });
+  await assert.rejects(L.chat(gemini, 'k', 'm', { messages: [] }, { fetchFn: bad }), /Check the API key/);
 });
 
 test('team names: short forms match, 3-letter codes only exactly', () => {

@@ -377,7 +377,11 @@ a.icon-btn { display: grid; place-items: center; }
 .badge.res-pending, .badge.res-void { background: var(--surface-2); color: var(--muted); }
 .odds-line { margin: 4px 0; }
 
-/* Match analyst (Claude) */
+/* Match analyst */
+.an-pick { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.an-pick select { flex: 1; min-width: 0; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
+.model-row input { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; margin-top: 4px; }
+.model-row { display: block; margin-top: 8px; }
 .an-form { display: flex; gap: 8px; margin: 10px 0 8px; }
 .an-form input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
 .chip[disabled] { opacity: .5; }
